@@ -20,25 +20,31 @@
  */
 package org.candlepin.subscriptions.tally;
 
+import com.redhat.swatch.configuration.registry.SubscriptionDefinition;
+import com.redhat.swatch.configuration.registry.Variant;
 import io.micrometer.core.annotation.Timed;
 import java.time.OffsetDateTime;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.ApplicationProperties;
+import org.candlepin.subscriptions.db.TallyStateRepository;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.exception.ErrorCode;
-import org.candlepin.subscriptions.exception.ExternalServiceException;
-import org.candlepin.subscriptions.util.DateRange;
-import org.candlepin.subscriptions.utilization.api.model.ProductId;
+import org.candlepin.subscriptions.db.model.TallySnapshot;
+import org.candlepin.subscriptions.db.model.TallyState;
+import org.candlepin.subscriptions.db.model.TallyStateKey;
+import org.candlepin.subscriptions.event.EventController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Provides the logic for updating Tally snapshots. */
 @Component
@@ -46,128 +52,171 @@ public class TallySnapshotController {
 
   private static final Logger log = LoggerFactory.getLogger(TallySnapshotController.class);
 
-  private final ApplicationProperties props;
+  private final ApplicationProperties appProps;
   private final InventoryAccountUsageCollector usageCollector;
-  private final CloudigradeAccountUsageCollector cloudigradeCollector;
+  private final EventController eventController;
   private final MetricUsageCollector metricUsageCollector;
   private final MaxSeenSnapshotStrategy maxSeenSnapshotStrategy;
   private final CombiningRollupSnapshotStrategy combiningRollupSnapshotStrategy;
   private final RetryTemplate retryTemplate;
-  private final RetryTemplate cloudigradeRetryTemplate;
-  private final Set<String> applicableProducts;
+  private final SnapshotSummaryProducer summaryProducer;
+  private final TallyStateRepository tallyStateRepository;
+  private final ApplicationClock clock;
 
   @Autowired
   public TallySnapshotController(
-      ApplicationProperties props,
-      @Qualifier("applicableProducts") Set<String> applicableProducts,
+      ApplicationProperties appProps,
       InventoryAccountUsageCollector usageCollector,
-      CloudigradeAccountUsageCollector cloudigradeCollector,
+      EventController eventController,
       MaxSeenSnapshotStrategy maxSeenSnapshotStrategy,
       @Qualifier("collectorRetryTemplate") RetryTemplate retryTemplate,
-      @Qualifier("cloudigradeRetryTemplate") RetryTemplate cloudigradeRetryTemplate,
-      @Qualifier("OpenShiftMetricsUsageCollector") MetricUsageCollector metricUsageCollector,
-      CombiningRollupSnapshotStrategy combiningRollupSnapshotStrategy) {
-
-    this.props = props;
-    this.applicableProducts = applicableProducts;
+      MetricUsageCollector metricUsageCollector,
+      CombiningRollupSnapshotStrategy combiningRollupSnapshotStrategy,
+      SnapshotSummaryProducer summaryProducer,
+      TallyStateRepository tallyStateRepository,
+      ApplicationClock clock) {
+    this.appProps = appProps;
     this.usageCollector = usageCollector;
-    this.cloudigradeCollector = cloudigradeCollector;
+    this.eventController = eventController;
     this.maxSeenSnapshotStrategy = maxSeenSnapshotStrategy;
     this.retryTemplate = retryTemplate;
-    this.cloudigradeRetryTemplate = cloudigradeRetryTemplate;
     this.metricUsageCollector = metricUsageCollector;
     this.combiningRollupSnapshotStrategy = combiningRollupSnapshotStrategy;
+    this.summaryProducer = summaryProducer;
+    this.tallyStateRepository = tallyStateRepository;
+    this.clock = clock;
   }
 
   @Timed("rhsm-subscriptions.snapshots.single")
-  public void produceSnapshotsForAccount(String account) {
-    produceSnapshotsForAccounts(Collections.singletonList(account));
-  }
-
-  @Timed("rhsm-subscriptions.snapshots.collection")
-  public void produceSnapshotsForAccounts(List<String> accounts) {
-    if (accounts.size() > props.getAccountBatchSize()) {
-      log.info(
-          "Skipping message w/ {} accounts: count is greater than configured batch size: {}",
-          accounts.size(),
-          props.getAccountBatchSize());
-      return;
-    }
-    log.info("Producing snapshots for {} accounts.", accounts.size());
-    // Account list could be large. Only print them when debugging.
-    if (log.isDebugEnabled()) {
-      log.debug("Producing snapshots for accounts: {}", String.join(",", accounts));
+  public void produceSnapshotsForOrg(String orgId) {
+    if (Objects.isNull(orgId)) {
+      throw new IllegalArgumentException("A non-null orgId is required for tally operations.");
     }
 
-    Map<String, AccountUsageCalculation> accountCalcs;
+    log.info("Producing snapshots for Org ID {} ", orgId);
+
+    AccountUsageCalculation accountCalc;
     try {
-      accountCalcs =
-          retryTemplate.execute(
-              context -> usageCollector.collect(this.applicableProducts, accounts));
-      if (props.isCloudigradeEnabled()) {
-        attemptCloudigradeEnrichment(accounts, accountCalcs);
-      }
+      accountCalc = performTally(orgId);
+
     } catch (Exception e) {
-      log.error("Could not collect existing usage snapshots for accounts {}", accounts, e);
+      log.error("Error collecting existing usage snapshots ", e);
       return;
     }
 
-    maxSeenSnapshotStrategy.produceSnapshotsFromCalculations(accounts, accountCalcs.values());
+    maxSeenSnapshotStrategy.produceSnapshotsFromCalculations(accountCalc);
   }
 
+  // Because we want to ensure that our DB operations have been completed before
+  // any messages are sent, message sending must be done outside a DB transaction
+  // boundary. We use Propagation.NEVER here so that if this method should ever be called
+  // from within an existing DB transaction, an exception will be thrown.
+  @Transactional(propagation = Propagation.NEVER)
   @Timed("rhsm-subscriptions.snapshots.single.hourly")
-  public void produceHourlySnapshotsForAccount(String accountNumber, DateRange snapshotRange) {
-    log.info(
-        "Producing hourly snapshot for account {} between startDateTime {} and endDateTime {}",
-        accountNumber,
-        snapshotRange.getStartString(),
-        snapshotRange.getEndString());
-    try {
-      var accountCalcs =
-          retryTemplate.execute(
-              context -> metricUsageCollector.collect(accountNumber, snapshotRange));
+  public void produceHourlySnapshotsForOrg(String orgId) {
+    if (Objects.isNull(orgId)) {
+      throw new IllegalArgumentException("A non-null orgId is required for tally operations.");
+    }
 
-      var applicableUsageCalculations =
-          accountCalcs.entrySet().stream()
-              .filter(TallySnapshotController::isCombiningRollupStrategySupported)
-              .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    log.info("Producing snapshots for Org ID {}.", orgId);
+    // Because we would have already seen the events once by service type, the loop will result in a
+    // retally if we fetch duplicate service types and loop through again, which is why we must use
+    // Set in this situation rather than List. Set enables us to guarantee that each event is
+    // fetched by service type just once.
+    Set<String> serviceTypes = SubscriptionDefinition.getAllServiceTypes();
+    for (String serviceType : serviceTypes) {
+      log.info("Producing hourly snapshots for orgId {} for service type {} ", orgId, serviceType);
 
-      combiningRollupSnapshotStrategy.produceSnapshotsFromCalculations(
-          accountNumber, applicableUsageCalculations, Granularity.HOURLY, Double::sum);
-      log.info("Finished producing hourly snapshots for account: {}", accountNumber);
-    } catch (Exception e) {
-      log.error(
-          "Could not collect metrics and/or produce snapshots for account {}", accountNumber, e);
+      try {
+        TallyState currentState =
+            tallyStateRepository
+                .findById(new TallyStateKey(orgId, serviceType))
+                .orElseGet(() -> initializeTallyState(orgId, serviceType));
+
+        AccountUsageCalculationCache calcCache = new AccountUsageCalculationCache();
+
+        // We use a functional interface for processing event batches to allow
+        // us to wrap the Event fetch in a read only transaction without needing
+        // to annotate this method with a DB transaction.
+        eventController.processEventsInBatches(
+            orgId,
+            serviceType,
+            currentState.getLatestEventRecordDate(),
+            appProps.getHourlyTallyEventBatchSize(),
+            nextBatch ->
+                retryTemplate.execute(
+                    context -> {
+                      metricUsageCollector.updateHosts(orgId, serviceType, nextBatch);
+                      metricUsageCollector.calculateUsage(nextBatch, calcCache);
+                      currentState.setLatestEventRecordDate(
+                          nextBatch.get(nextBatch.size() - 1).getRecordDate());
+                      return null;
+                    }));
+
+        if (!calcCache.isEmpty()) {
+          var applicableUsageCalculations =
+              calcCache.getCalculations().entrySet().stream()
+                  .filter(this::isCombiningRollupStrategySupported)
+                  .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+          Set<String> tags =
+              SubscriptionDefinition.findByServiceType(serviceType).stream()
+                  .map(SubscriptionDefinition::getVariants)
+                  .flatMap(List::stream)
+                  .map(Variant::getTag)
+                  .collect(Collectors.toSet());
+
+          Map<String, List<TallySnapshot>> totalSnapshots =
+              combiningRollupSnapshotStrategy.produceSnapshotsFromCalculations(
+                  orgId,
+                  calcCache.getCalculationRange(),
+                  tags,
+                  applicableUsageCalculations,
+                  Granularity.HOURLY,
+                  Double::sum);
+
+          tallyStateRepository.update(currentState);
+          summaryProducer.produceTallySummaryMessages(totalSnapshots);
+        }
+
+        log.info("Finished producing {} hourly snapshots for orgId {}", serviceType, orgId);
+      } catch (Exception e) {
+        log.error(
+            "Could not collect {} metrics and/or produce snapshots for with orgId {}",
+            serviceType,
+            orgId,
+            e);
+      }
     }
   }
 
-  private void attemptCloudigradeEnrichment(
-      List<String> accounts, Map<String, AccountUsageCalculation> accountCalcs) {
-    log.info("Adding cloudigrade reports to calculations.");
-    try {
-      cloudigradeRetryTemplate.execute(
-          context -> {
-            try {
-              cloudigradeCollector.enrichUsageWithCloudigradeData(accountCalcs, accounts);
-            } catch (Exception e) {
-              throw new ExternalServiceException(
-                  ErrorCode.REQUEST_PROCESSING_ERROR,
-                  "Error during attempt to integrate cloudigrade report",
-                  e);
-            }
-            return null; // RetryCallback requires a return
-          });
-    } catch (Exception e) {
-      log.warn("Exception during cloudigrade enrichment, tally will not be enriched.", e);
-    }
-  }
-
-  private static boolean isCombiningRollupStrategySupported(
+  private boolean isCombiningRollupStrategySupported(
       Map.Entry<OffsetDateTime, AccountUsageCalculation> usageCalculations) {
 
     var calculatedProducts = usageCalculations.getValue().getProducts();
+    return calculatedProducts.stream()
+        .map(SubscriptionDefinition::lookupSubscriptionByTag)
+        .anyMatch(x -> x.map(SubscriptionDefinition::isPaygEligible).orElse(false));
+  }
 
-    return calculatedProducts.contains(ProductId.OPENSHIFT_METRICS.toString())
-        || calculatedProducts.contains(ProductId.OPENSHIFT_DEDICATED_METRICS.toString());
+  private AccountUsageCalculation performTally(String orgId) {
+    retryTemplate.execute(
+        context -> {
+          usageCollector.reconcileSystemDataWithHbi(
+              orgId, SubscriptionDefinition.getAllNonPaygTags());
+          return null;
+        });
+    return usageCollector.tally(orgId);
+  }
+
+  private TallyState initializeTallyState(String orgId, String serviceType) {
+    OffsetDateTime defaultLastEventRecordDate = clock.startOfToday().minusDays(1);
+    log.info(
+        "Initializing tally state orgId={} serviceType={} lastEventRecordDate={}",
+        orgId,
+        serviceType,
+        defaultLastEventRecordDate);
+    return tallyStateRepository.save(
+        new TallyState(orgId, serviceType, defaultLastEventRecordDate));
   }
 }

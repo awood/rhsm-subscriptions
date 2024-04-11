@@ -20,7 +20,7 @@
  */
 package org.candlepin.subscriptions.resource;
 
-import javax.ws.rs.BadRequestException;
+import jakarta.ws.rs.BadRequestException;
 import org.candlepin.subscriptions.db.model.config.OptInType;
 import org.candlepin.subscriptions.security.OptInController;
 import org.candlepin.subscriptions.security.auth.SubscriptionWatchAdminOnly;
@@ -43,50 +43,28 @@ public class OptInResource implements OptInApi {
   @SubscriptionWatchAdminOnly
   @Override
   public void deleteOptInConfig() {
-    controller.optOut(validateAccountNumber(), validateOrgId());
+    controller.optOut(validateOrgId());
   }
 
   @SubscriptionWatchAdminOnly
   @Override
   public OptInConfig getOptInConfig() {
-    return controller.getOptInConfig(validateAccountNumber(), validateOrgId());
+    return controller.getOptInConfig(validateOrgId());
   }
 
   @SubscriptionWatchAdminOnly
   @Override
-  public OptInConfig putOptInConfig(
-      Boolean enableTallySync, Boolean enableTallyReporting, Boolean enableConduitSync) {
+  public OptInConfig putOptInConfig() {
     // NOTE: All query params are defaulted to 'true' by the API definition, however we
     //       double check below.
-    return controller.optIn(
-        validateAccountNumber(),
-        validateOrgId(),
-        OptInType.API,
-        trueIfNull(enableTallySync),
-        trueIfNull(enableTallyReporting),
-        trueIfNull(enableConduitSync));
-  }
-
-  private String validateAccountNumber() {
-    String accountNumber = ResourceUtils.getAccountNumber();
-    if (accountNumber == null) {
-      throw new BadRequestException("Must specify an account number.");
-    }
-    return accountNumber;
+    return controller.optIn(validateOrgId(), OptInType.API);
   }
 
   private String validateOrgId() {
-    String ownerId = ResourceUtils.getOwnerId();
-    if (ownerId == null) {
+    String orgId = ResourceUtils.getOrgId();
+    if (orgId == null) {
       throw new BadRequestException("Must specify an org ID.");
     }
-    return ownerId;
-  }
-
-  private Boolean trueIfNull(Boolean toVerify) {
-    if (toVerify == null) {
-      return true;
-    }
-    return toVerify;
+    return orgId;
   }
 }

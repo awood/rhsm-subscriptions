@@ -20,47 +20,35 @@
  */
 package org.candlepin.subscriptions.tally.filler;
 
-import static org.candlepin.subscriptions.tally.filler.Assertions.assertSnapshot;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.time.OffsetDateTime;
-import java.util.Arrays;
 import java.util.List;
-import org.candlepin.subscriptions.FixedClockConfiguration;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.util.ApplicationClock;
-import org.candlepin.subscriptions.utilization.api.model.TallyReport;
-import org.candlepin.subscriptions.utilization.api.model.TallySnapshot;
 import org.junit.jupiter.api.Test;
 
-public class WeeklyReportFillerTest {
+class WeeklyReportFillerTest extends BaseReportFillerTest {
 
-  private ApplicationClock clock;
-  private ReportFiller filler;
-
-  public WeeklyReportFillerTest() {
-    clock = new FixedClockConfiguration().fixedClock();
-    filler = ReportFillerFactory.getInstance(clock, Granularity.WEEKLY);
+  @Override
+  Granularity granularity() {
+    return Granularity.WEEKLY;
   }
 
   @Test
-  public void noExistingSnapsShouldFillWithWeeklyGranularity() {
+  void noExistingSnapsShouldFillWithWeeklyGranularity() {
     OffsetDateTime start = clock.startOfCurrentWeek();
     OffsetDateTime end = start.plusWeeks(3);
 
-    TallyReport report = new TallyReport();
-    filler.fillGaps(report, start, end, false);
-
-    List<TallySnapshot> filled = report.getData();
+    var filled = whenFillGaps(List.of(), start, end);
     assertEquals(4, filled.size());
-    assertSnapshot(filled.get(0), start, 0, 0, 0, false);
-    assertSnapshot(filled.get(1), start.plusWeeks(1), null, null, null, false);
-    assertSnapshot(filled.get(2), start.plusWeeks(2), null, null, null, false);
-    assertSnapshot(filled.get(3), start.plusWeeks(3), null, null, null, false);
+    assertDataPointIsEmpty(filled.get(0), start);
+    assertDataPointIsEmpty(filled.get(1), start.plusWeeks(1));
+    assertDataPointIsEmpty(filled.get(2), start.plusWeeks(2));
+    assertDataPointIsEmpty(filled.get(3), start.plusWeeks(3));
   }
 
   @Test
-  public void startAndEndDatesForWeeklyAreResetWhenDateIsMidWeek() {
+  void startAndEndDatesForWeeklyAreResetWhenDateIsMidWeek() {
     // Mid week start
     OffsetDateTime start = clock.now();
     // Mid week end
@@ -69,69 +57,42 @@ public class WeeklyReportFillerTest {
     // Expected to start on the beginning of the week.
     OffsetDateTime expectedStart = clock.startOfWeek(start);
 
-    TallyReport report = new TallyReport();
-    filler.fillGaps(report, start, end, false);
-
-    List<TallySnapshot> filled = report.getData();
+    var filled = whenFillGaps(List.of(), start, end);
     assertEquals(4, filled.size());
-    assertSnapshot(filled.get(0), expectedStart, 0, 0, 0, false);
-    assertSnapshot(filled.get(1), expectedStart.plusWeeks(1), null, null, null, false);
-    assertSnapshot(filled.get(2), expectedStart.plusWeeks(2), null, null, null, false);
-    assertSnapshot(filled.get(3), expectedStart.plusWeeks(3), null, null, null, false);
+    assertDataPointIsEmpty(filled.get(0), expectedStart);
+    assertDataPointIsEmpty(filled.get(1), expectedStart.plusWeeks(1));
+    assertDataPointIsEmpty(filled.get(2), expectedStart.plusWeeks(2));
+    assertDataPointIsEmpty(filled.get(3), expectedStart.plusWeeks(3));
   }
 
   @Test
-  public void testSnapshotsIgnoredWhenNoDatesSet() {
+  void testSnapshotsIgnoredWhenNoDatesSet() {
     OffsetDateTime start = clock.startOfCurrentWeek();
     OffsetDateTime end = start.plusWeeks(3);
 
-    TallySnapshot snap1 = new TallySnapshot().cores(2).sockets(3).instanceCount(4).hasData(true);
-    TallySnapshot snap2 = new TallySnapshot().cores(5).sockets(6).instanceCount(7).hasData(true);
-    List<TallySnapshot> snaps = Arrays.asList(snap1, snap2);
+    var points = List.of(point(null, 2.0), point(null, 6.0));
+    var filled = whenFillGaps(points, start, end);
 
-    TallyReport report = new TallyReport().data(snaps);
-    filler.fillGaps(report, start, end, false);
-
-    List<TallySnapshot> filled = report.getData();
     assertEquals(4, filled.size());
-    assertSnapshot(filled.get(0), start, 0, 0, 0, false);
-    assertSnapshot(filled.get(1), start.plusWeeks(1), null, null, null, false);
-    assertSnapshot(filled.get(2), start.plusWeeks(2), null, null, null, false);
-    assertSnapshot(filled.get(3), start.plusWeeks(3), null, null, null, false);
+    assertDataPointIsEmpty(filled.get(0), start);
+    assertDataPointIsEmpty(filled.get(1), start.plusWeeks(1));
+    assertDataPointIsEmpty(filled.get(2), start.plusWeeks(2));
+    assertDataPointIsEmpty(filled.get(3), start.plusWeeks(3));
   }
 
   @Test
-  public void shouldFillGapsBasedOnExistingSnapshotsForWeeklyGranularity() {
+  void shouldFillGapsBasedOnExistingSnapshotsForWeeklyGranularity() {
     OffsetDateTime start = clock.startOfCurrentWeek();
-    OffsetDateTime snap1Date = start.plusWeeks(1);
+    OffsetDateTime point1Date = start.plusWeeks(1);
     OffsetDateTime end = start.plusWeeks(3);
 
-    TallySnapshot snap1 =
-        new TallySnapshot().date(snap1Date).cores(2).sockets(3).instanceCount(4).hasData(true);
-    TallySnapshot snap2 =
-        new TallySnapshot().date(end).cores(5).sockets(6).instanceCount(7).hasData(true);
-    List<TallySnapshot> snaps = Arrays.asList(snap1, snap2);
+    var points = List.of(point(point1Date, 2.0), point(end, 6.0));
+    var filled = whenFillGaps(points, start, end);
 
-    TallyReport report = new TallyReport().data(snaps);
-    filler.fillGaps(report, start, end, false);
-
-    List<TallySnapshot> filled = report.getData();
     assertEquals(4, filled.size());
-    assertSnapshot(filled.get(0), start, 0, 0, 0, false);
-    assertSnapshot(
-        filled.get(1),
-        snap1.getDate(),
-        snap1.getCores(),
-        snap1.getSockets(),
-        snap1.getInstanceCount(),
-        true);
-    assertSnapshot(filled.get(2), start.plusWeeks(2), null, null, null, false);
-    assertSnapshot(
-        filled.get(3),
-        snap2.getDate(),
-        snap2.getCores(),
-        snap2.getSockets(),
-        snap2.getInstanceCount(),
-        true);
+    assertDataPointIsEmpty(filled.get(0), start);
+    assertDataPoint(filled.get(1), start.plusWeeks(1), 2.0);
+    assertDataPointIsEmpty(filled.get(2), start.plusWeeks(2));
+    assertDataPoint(filled.get(3), start.plusWeeks(3), 6.0);
   }
 }

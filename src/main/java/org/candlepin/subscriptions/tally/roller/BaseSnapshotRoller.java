@@ -20,10 +20,10 @@
  */
 package org.candlepin.subscriptions.tally.roller;
 
+import com.redhat.swatch.configuration.registry.SubscriptionDefinition;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -31,16 +31,15 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.db.model.HardwareMeasurement;
 import org.candlepin.subscriptions.db.model.HardwareMeasurementType;
+import org.candlepin.subscriptions.db.model.TallyMeasurementKey;
 import org.candlepin.subscriptions.db.model.TallySnapshot;
-import org.candlepin.subscriptions.files.ProductProfileRegistry;
 import org.candlepin.subscriptions.tally.AccountUsageCalculation;
 import org.candlepin.subscriptions.tally.UsageCalculation;
 import org.candlepin.subscriptions.tally.UsageCalculation.Totals;
-import org.candlepin.subscriptions.util.ApplicationClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,34 +54,30 @@ public abstract class BaseSnapshotRoller {
 
   protected TallySnapshotRepository tallyRepo;
   protected ApplicationClock clock;
-  protected final ProductProfileRegistry productProfileRegistry;
 
-  protected BaseSnapshotRoller(
-      TallySnapshotRepository tallyRepo, ApplicationClock clock, ProductProfileRegistry registry) {
+  protected BaseSnapshotRoller(TallySnapshotRepository tallyRepo, ApplicationClock clock) {
     this.tallyRepo = tallyRepo;
     this.clock = clock;
-    this.productProfileRegistry = registry;
   }
 
   /**
    * Roll the snapshots for the given account.
    *
-   * @param accounts the accounts of the snapshots to roll.
-   * @param accountCalcs the current calculations from the host inventory.
+   * @param accountCalc the current calculation from the host inventory.
    * @return collection of snapshots
    */
-  public abstract Collection<TallySnapshot> rollSnapshots(
-      Collection<String> accounts, Collection<AccountUsageCalculation> accountCalcs);
+  public abstract Collection<TallySnapshot> rollSnapshots(AccountUsageCalculation accountCalc);
 
   protected TallySnapshot createSnapshotFromProductUsageCalculation(
-      String account, String owner, UsageCalculation productCalc, Granularity granularity) {
+      String orgId, UsageCalculation productCalc, Granularity granularity) {
     TallySnapshot snapshot = new TallySnapshot();
     snapshot.setProductId(productCalc.getProductId());
     snapshot.setServiceLevel(productCalc.getSla());
     snapshot.setUsage(productCalc.getUsage());
+    snapshot.setBillingProvider(productCalc.getBillingProvider());
+    snapshot.setBillingAccountId(productCalc.getBillingAccountId());
     snapshot.setGranularity(granularity);
-    snapshot.setOwnerId(owner);
-    snapshot.setAccountNumber(account);
+    snapshot.setOrgId(orgId);
     snapshot.setSnapshotDate(getSnapshotDate(granularity));
 
     // Copy the calculated hardware measurements to the snapshots
@@ -90,11 +85,6 @@ public abstract class BaseSnapshotRoller {
       Totals calculatedTotals = productCalc.getTotals(type);
       if (calculatedTotals != null) {
         log.debug("Updating snapshot with hardware measurement: {}", type);
-        HardwareMeasurement total = new HardwareMeasurement();
-        total.setCores(calculatedTotals.getCores());
-        total.setSockets(calculatedTotals.getSockets());
-        total.setInstanceCount(calculatedTotals.getInstances());
-        snapshot.setHardwareMeasurement(type, total);
         calculatedTotals
             .getMeasurements()
             .forEach((uom, value) -> snapshot.setMeasurement(type, uom, value));
@@ -107,78 +97,59 @@ public abstract class BaseSnapshotRoller {
   }
 
   protected OffsetDateTime getSnapshotDate(Granularity granularity) {
-    switch (granularity) {
-      case HOURLY:
-        return clock.startOfCurrentHour();
-      case DAILY:
-        return clock.startOfToday();
-      case WEEKLY:
-        return clock.startOfCurrentWeek();
-      case MONTHLY:
-        return clock.startOfCurrentMonth();
-      case QUARTERLY:
-        return clock.startOfCurrentQuarter();
-      case YEARLY:
-        return clock.startOfCurrentYear();
-      default:
-        throw new IllegalArgumentException(
-            String.format("Unsupported granularity: %s", granularity));
-    }
+    return switch (granularity) {
+      case HOURLY -> clock.startOfCurrentHour();
+      case DAILY -> clock.startOfToday();
+      case WEEKLY -> clock.startOfCurrentWeek();
+      case MONTHLY -> clock.startOfCurrentMonth();
+      case QUARTERLY -> clock.startOfCurrentQuarter();
+      case YEARLY -> clock.startOfCurrentYear();
+    };
   }
 
   @SuppressWarnings("indentation")
-  protected Map<String, List<TallySnapshot>> getCurrentSnapshotsByAccount(
-      Collection<String> accounts,
+  protected List<TallySnapshot> getCurrentSnapshotsByOrgId(
+      String orgId,
       Collection<String> products,
       Granularity granularity,
       OffsetDateTime begin,
       OffsetDateTime end) {
     try (Stream<TallySnapshot> snapStream =
-        tallyRepo.findByAccountNumberInAndProductIdInAndGranularityAndSnapshotDateBetween(
-            accounts, products, granularity, begin, end)) {
-      return snapStream.collect(Collectors.groupingBy(TallySnapshot::getAccountNumber));
+        tallyRepo.findByOrgIdAndProductIdInAndGranularityAndSnapshotDateBetween(
+            orgId, products, granularity, begin, end)) {
+      return snapStream.collect(Collectors.toList());
     }
   }
 
   protected Collection<TallySnapshot> updateSnapshots(
-      Collection<AccountUsageCalculation> accountCalcs,
-      Map<String, List<TallySnapshot>> existingSnaps,
+      AccountUsageCalculation accountCalc,
+      List<TallySnapshot> existingSnaps,
       Granularity targetGranularity) {
     List<TallySnapshot> snaps = new LinkedList<>();
-    for (AccountUsageCalculation accountCalc : accountCalcs) {
-      String account = accountCalc.getAccount();
+    Map<UsageCalculation.Key, TallySnapshot> orgSnapsByUsageKey;
+    orgSnapsByUsageKey =
+        existingSnaps.stream()
+            .collect(
+                Collectors.toMap(
+                    UsageCalculation.Key::fromTallySnapshot,
+                    Function.identity(),
+                    this::handleDuplicateSnapshot));
 
-      Map<UsageCalculation.Key, TallySnapshot> accountSnapsByUsageKey = new HashMap<>();
-      if (existingSnaps.containsKey(account)) {
-        accountSnapsByUsageKey =
-            existingSnaps.get(account).stream()
-                .collect(
-                    Collectors.toMap(
-                        UsageCalculation.Key::fromTallySnapshot,
-                        Function.identity(),
-                        this::handleDuplicateSnapshot));
-      }
+    for (UsageCalculation.Key usageKey : accountCalc.getKeys()) {
+      boolean isGranularitySupported =
+          SubscriptionDefinition.variantSupportsGranularity(
+              usageKey.getProductId(), targetGranularity.toString());
 
-      for (UsageCalculation.Key usageKey : accountCalc.getKeys()) {
-        boolean isGranularitySupported =
-            productProfileRegistry
-                .findProfileForSwatchProductId(usageKey.getProductId())
-                .supportsGranularity(targetGranularity);
-
-        if (isGranularitySupported) {
-          TallySnapshot snap = accountSnapsByUsageKey.get(usageKey);
-          UsageCalculation productCalc = accountCalc.getCalculation(usageKey);
-          if (snap == null && productCalc.hasMeasurements()) {
-            snap =
-                createSnapshotFromProductUsageCalculation(
-                    accountCalc.getAccount(),
-                    accountCalc.getOwner(),
-                    productCalc,
-                    targetGranularity);
-            snaps.add(snap);
-          } else if (snap != null && updateMaxValues(snap, productCalc)) {
-            snaps.add(snap);
-          }
+      if (isGranularitySupported) {
+        TallySnapshot snap = orgSnapsByUsageKey.get(usageKey);
+        UsageCalculation productCalc = accountCalc.getCalculation(usageKey);
+        if (snap == null && productCalc.hasMeasurements()) {
+          snap =
+              createSnapshotFromProductUsageCalculation(
+                  accountCalc.getOrgId(), productCalc, targetGranularity);
+          snaps.add(snap);
+        } else if (snap != null && updateMaxValues(snap, productCalc)) {
+          snaps.add(snap);
         }
       }
     }
@@ -196,23 +167,11 @@ public abstract class BaseSnapshotRoller {
   }
 
   protected Set<String> getApplicableProducts(
-      Collection<AccountUsageCalculation> accountCalcs, Granularity granularity) {
-    Set<String> prods = new HashSet<>();
-
-    for (AccountUsageCalculation calc : accountCalcs) {
-      Stream<String> prodStream = calc.getProducts().stream();
-      Set<String> matchingProds =
-          prodStream
-              .filter(
-                  p ->
-                      productProfileRegistry
-                          .findProfileForSwatchProductId(p)
-                          .supportsGranularity(granularity))
-              .collect(Collectors.toSet());
-      prods.addAll(matchingProds);
-    }
-
-    return prods;
+      AccountUsageCalculation calc, Granularity granularity) {
+    Stream<String> prodStream = calc.getProducts().stream();
+    return prodStream
+        .filter(p -> SubscriptionDefinition.variantSupportsGranularity(p, granularity.toString()))
+        .collect(Collectors.toSet());
   }
 
   private boolean isFinestGranularity(TallySnapshot snap) {
@@ -232,9 +191,17 @@ public abstract class BaseSnapshotRoller {
   }
 
   private Granularity getFinestGranularity(TallySnapshot snap) {
-    return productProfileRegistry
-        .findProfileForSwatchProductId(snap.getProductId())
-        .getFinestGranularity();
+    // The snapshot calls this a "product ID" but in the SubscriptionDefinition world it's actually
+    // a variant's tag
+    String productId = snap.getProductId();
+    var subscription =
+        SubscriptionDefinition.lookupSubscriptionByTag(productId)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        productId + " missing in subscription configuration"));
+
+    return Granularity.fromString(subscription.getFinestGranularity().toString());
   }
 
   private boolean updateTotals(
@@ -244,50 +211,18 @@ public abstract class BaseSnapshotRoller {
       UsageCalculation calc) {
 
     Totals prodCalcTotals = calc.getTotals(measurementType);
-    HardwareMeasurement measurement = snap.getHardwareMeasurement(measurementType);
 
     // Nothing to update if the existing measure does not exist and there
     // was no new incoming measurement.
-    if (measurement == null && prodCalcTotals == null) {
+    if (prodCalcTotals == null) {
       return false;
     }
 
-    boolean changed = false;
-
-    // If the calculated values for the measurement do not exist, zero them out
-    // for the snapshot update. Daily snapshots will have the values reset to zero.
-    // All other snapshots will take the existing value.
-    int calcSockets = prodCalcTotals != null ? prodCalcTotals.getSockets() : 0;
-    int calcCores = prodCalcTotals != null ? prodCalcTotals.getCores() : 0;
-    int calcInstanceCount = prodCalcTotals != null ? prodCalcTotals.getInstances() : 0;
-
-    if (measurement == null) {
-      // All the int fields in measurement will be initialized to zero
-      measurement = new HardwareMeasurement();
-    }
-
-    if (override || mustUpdate(measurement.getCores(), calcCores)) {
-      measurement.setCores(calcCores);
-      changed = true;
-    }
-
-    if (override || mustUpdate(measurement.getSockets(), calcSockets)) {
-      measurement.setSockets(calcSockets);
-      changed = true;
-    }
-
-    if (override || mustUpdate(measurement.getInstanceCount(), calcInstanceCount)) {
-      measurement.setInstanceCount(calcInstanceCount);
-      changed = true;
-    }
+    HashMap<TallyMeasurementKey, Double> beforeUpdate = new HashMap<>(snap.getTallyMeasurements());
 
     updateUomTotals(override, snap, measurementType, prodCalcTotals);
 
-    if (changed) {
-      snap.setHardwareMeasurement(measurementType, measurement);
-    }
-
-    return changed;
+    return override || !beforeUpdate.equals(snap.getTallyMeasurements());
   }
 
   private void updateUomTotals(
@@ -309,11 +244,7 @@ public abstract class BaseSnapshotRoller {
     }
   }
 
-  private boolean mustUpdate(Double existing, Double newMeasurment) {
-    return existing == null || newMeasurment > existing;
-  }
-
-  private boolean mustUpdate(Integer v1, Integer v2) {
-    return v1 == null || v2 > v1;
+  private boolean mustUpdate(Double existing, Double newMeasurement) {
+    return existing == null || newMeasurement > existing;
   }
 }

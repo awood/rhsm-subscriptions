@@ -20,32 +20,88 @@
  */
 package org.candlepin.subscriptions.subscription;
 
-import java.util.Collections;
+import java.time.OffsetDateTime;
 import java.util.List;
+import org.candlepin.subscriptions.subscription.api.model.ExternalReference;
 import org.candlepin.subscriptions.subscription.api.model.Subscription;
+import org.candlepin.subscriptions.subscription.api.model.SubscriptionProduct;
 import org.candlepin.subscriptions.subscription.api.resources.SearchApi;
 
 /** Stub version of the SearchApi for the Subscription service for local testing. */
 public class StubSearchApi extends SearchApi {
 
+  public static final String START_DATE = "2011-01-01T01:02:33Z";
+  public static final String END_DATE = "2031-01-01T01:02:33Z";
+
   @Override
-  public Subscription getSubscriptionById(String id) throws ApiException {
-    return createData();
+  public Subscription getSubscriptionById(String id) {
+    if ("789".equals(id)) {
+      return createAwsBillingProviderData();
+    } else if ("790".equals(id)) {
+      return createDataForOrgId(790);
+    }
+    return createDefaultData();
   }
 
   @Override
-  public List<Subscription> searchSubscriptionsByAccountNumber(
-      String accountNumber, Integer index, Integer pageSize) throws ApiException {
-    return Collections.singletonList(createData());
+  public List<Subscription> getSubscriptionBySubscriptionNumber(String subscriptionNumber) {
+    return List.of(createAwsBillingProviderData());
   }
 
   @Override
   public List<Subscription> searchSubscriptionsByOrgId(
-      String orgId, Integer index, Integer pageSize) throws ApiException {
-    return Collections.singletonList(createData());
+      String orgId, Integer index, Integer pageSize) {
+    return List.of(
+        createDefaultData(),
+        createAwsBillingProviderData(),
+        createRhelData(),
+        createDataForOrgId(790));
   }
 
-  private Subscription createData() {
-    return new Subscription().subscriptionNumber("2253591");
+  private Subscription createDefaultData() {
+    return createData(123, "MW01485");
+  }
+
+  private Subscription createDataForOrgId(int orgId) {
+    return createData(orgId, "SKU00" + orgId);
+  }
+
+  private Subscription createData(int orgId, String sku) {
+    return new Subscription()
+        .id(orgId)
+        .subscriptionNumber("" + orgId)
+        .webCustomerId(orgId)
+        .quantity(1)
+        .effectiveStartDate(OffsetDateTime.parse(START_DATE).toEpochSecond() * 1000L)
+        .effectiveEndDate(OffsetDateTime.parse(END_DATE).toEpochSecond() * 1000L)
+        .subscriptionProducts(List.of(new SubscriptionProduct().sku(sku)));
+  }
+
+  private Subscription createRhelData() {
+    return new Subscription()
+        .id(235255)
+        .subscriptionNumber("2253594")
+        .webCustomerId(123)
+        .quantity(1)
+        .effectiveStartDate(OffsetDateTime.parse(START_DATE).toEpochSecond() * 1000L)
+        .effectiveEndDate(OffsetDateTime.parse(END_DATE).toEpochSecond() * 1000L)
+        .subscriptionProducts(List.of(new SubscriptionProduct().sku("RH3413336")));
+  }
+
+  private Subscription createAwsBillingProviderData() {
+    ExternalReference awsRef = new ExternalReference();
+    awsRef.setCustomerID("customer123");
+    awsRef.setProductCode("testProductCode123");
+    awsRef.setSellerAccount("awsSellerAccountId");
+    awsRef.setCustomerAccountID("1234567891234");
+    return new Subscription()
+        .id(235252)
+        .quantity(1)
+        .webCustomerId(123)
+        .subscriptionNumber("4243626")
+        .effectiveStartDate(OffsetDateTime.parse(START_DATE).toEpochSecond() * 1000L)
+        .effectiveEndDate(OffsetDateTime.parse(END_DATE).toEpochSecond() * 1000L)
+        .putExternalReferencesItem("aws", awsRef)
+        .subscriptionProducts(List.of(new SubscriptionProduct().sku("MW01882")));
   }
 }

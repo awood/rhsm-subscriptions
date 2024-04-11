@@ -20,24 +20,18 @@
  */
 package org.candlepin.subscriptions.tally.roller;
 
-import static org.candlepin.subscriptions.db.model.Granularity.*;
+import static org.candlepin.subscriptions.db.model.Granularity.HOURLY;
 
-import java.time.Duration;
-import org.candlepin.subscriptions.ApplicationProperties;
-import org.candlepin.subscriptions.FixedClockConfiguration;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
-import org.candlepin.subscriptions.files.ProductProfileRegistrySource;
-import org.candlepin.subscriptions.util.ApplicationClock;
+import org.candlepin.subscriptions.test.TestClockConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,37 +40,20 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @ActiveProfiles({"api", "test"})
 @TestInstance(Lifecycle.PER_CLASS)
+@Import(TestClockConfiguration.class)
 class HourlySnapshotRollerTest {
 
   @Autowired private TallySnapshotRepository repository;
-
-  @Autowired private ProductProfileRegistrySource testSource;
 
   @Autowired private ApplicationClock clock;
 
   private SnapshotRollerTester<HourlySnapshotRoller> tester;
 
-  @TestConfiguration
-  @Import(FixedClockConfiguration.class)
-  static class HourlySnapshotRollerTestConfig {
-
-    @Bean
-    @Primary
-    public ProductProfileRegistrySource testRegistrySource(ApplicationClock clock) {
-      ApplicationProperties properties = new ApplicationProperties();
-      properties.setProductProfileRegistryResourceLocation(
-          "classpath:test_product_profile_registry.yaml");
-      properties.setProductProfileListCacheTtl(Duration.ofSeconds(60));
-      return new ProductProfileRegistrySource(properties, clock);
-    }
-  }
-
   @BeforeEach
-  public void setupAllTests() throws Exception {
+  void setupAllTests() throws Exception {
     this.tester =
-        new SnapshotRollerTester<>(
-            repository, new HourlySnapshotRoller(repository, clock, testSource.getObject()));
-    this.tester.setTestProduct("OpenShift Hourly");
+        new SnapshotRollerTester<>(repository, new HourlySnapshotRoller(repository, clock));
+    this.tester.setTestProduct("OpenShift-dedicated-metrics");
   }
 
   @Test
@@ -95,13 +72,6 @@ class HourlySnapshotRollerTest {
   void ensureCurrentHourlyUpdatedRegardlessOfWhetherIncomingCalculationsAreLessThanTheExisting() {
     tester.performUpdateWithLesserValueTest(
         HOURLY, clock.startOfCurrentHour(), clock.endOfCurrentHour(), false);
-  }
-
-  @Test
-  @SuppressWarnings("java:S2699") /* Sonar thinks no assertions */
-  void testEmptySnapshotsNotPersisted() {
-    tester.performDoesNotPersistEmptySnapshots(
-        HOURLY, clock.startOfCurrentHour(), clock.endOfCurrentHour());
   }
 
   @Test

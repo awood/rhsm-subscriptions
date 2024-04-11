@@ -20,18 +20,17 @@
  */
 package org.candlepin.subscriptions.tally.roller;
 
-import java.io.IOException;
-import org.candlepin.subscriptions.FixedClockConfiguration;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.files.ProductProfileRegistry;
-import org.candlepin.subscriptions.util.ApplicationClock;
+import org.candlepin.subscriptions.test.TestClockConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,38 +39,34 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @ActiveProfiles({"api", "test"})
 @TestInstance(Lifecycle.PER_CLASS)
-public class YearlySnapshotRollerTest {
+@Import(TestClockConfiguration.class)
+class YearlySnapshotRollerTest {
 
   @Autowired private TallySnapshotRepository repository;
-
-  @Autowired private ProductProfileRegistry registry;
-
-  private ApplicationClock clock;
+  @Autowired private ApplicationClock clock;
 
   private SnapshotRollerTester<YearlySnapshotRoller> tester;
 
   @BeforeEach
-  public void setupTest() throws IOException {
-    this.clock = new FixedClockConfiguration().fixedClock();
+  void setupTest() {
     this.tester =
-        new SnapshotRollerTester<>(
-            repository, new YearlySnapshotRoller(repository, clock, registry));
+        new SnapshotRollerTester<>(repository, new YearlySnapshotRoller(repository, clock));
   }
 
   @Test
-  public void testYearlySnapshotProduction() {
+  void testYearlySnapshotProduction() {
     this.tester.performBasicSnapshotRollerTest(
         Granularity.YEARLY, clock.startOfCurrentYear(), clock.endOfCurrentYear());
   }
 
   @Test
-  public void testYearlySnapIsUpdatedWhenItAlreadyExists() {
+  void testYearlySnapIsUpdatedWhenItAlreadyExists() {
     this.tester.performSnapshotUpdateTest(
         Granularity.YEARLY, clock.startOfCurrentYear(), clock.endOfCurrentYear());
   }
 
   @Test
-  public void ensureCurrentYearlyIsNotUpdatedWhenIncomingCalculationsAreLessThanTheExisting() {
+  void ensureCurrentYearlyIsNotUpdatedWhenIncomingCalculationsAreLessThanTheExisting() {
     this.tester.performUpdateWithLesserValueTest(
         Granularity.YEARLY, clock.startOfCurrentYear(), clock.endOfCurrentYear(), true);
   }

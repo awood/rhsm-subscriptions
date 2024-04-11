@@ -20,12 +20,19 @@
  */
 package org.candlepin.subscriptions.resource;
 
+import com.redhat.swatch.contracts.client.CapacityApiFactory;
 import org.candlepin.subscriptions.db.RhsmSubscriptionsDataSourceConfiguration;
-import org.candlepin.subscriptions.files.ProductMappingConfiguration;
+import org.candlepin.subscriptions.http.HttpClientProperties;
 import org.candlepin.subscriptions.resteasy.ResteasyConfiguration;
 import org.candlepin.subscriptions.tally.TallyWorkerConfiguration;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter;
+import org.springframework.boot.context.TypeExcludeFilter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Profile;
 
@@ -36,13 +43,32 @@ import org.springframework.context.annotation.Profile;
  */
 @Configuration
 @Profile("api")
-@ComponentScan(basePackages = "org.candlepin.subscriptions.resource")
+@ComponentScan(
+    basePackages = "org.candlepin.subscriptions.resource",
+    // Prevent TestConfiguration annotated classes from being picked up by ComponentScan
+    excludeFilters = {
+      @ComponentScan.Filter(type = FilterType.CUSTOM, classes = TypeExcludeFilter.class),
+      @ComponentScan.Filter(
+          type = FilterType.CUSTOM,
+          classes = AutoConfigurationExcludeFilter.class)
+    })
 @Import({
   ResteasyConfiguration.class,
   RhsmSubscriptionsDataSourceConfiguration.class,
-  TallyWorkerConfiguration.class,
-  ProductMappingConfiguration.class
+  TallyWorkerConfiguration.class
 })
 public class ApiConfiguration {
-  /* Intentionally empty */
+
+  @Qualifier("apiCapacityClientProperties")
+  @ConfigurationProperties(prefix = "rhsm-subscriptions.api.capacity.client")
+  @Bean
+  HttpClientProperties capacityHttpClientProperties() {
+    return new HttpClientProperties();
+  }
+
+  @Bean
+  CapacityApiFactory capacityApiFactory(
+      @Qualifier("apiCapacityClientProperties") HttpClientProperties httpClientProperties) {
+    return new CapacityApiFactory(httpClientProperties, ResourceUtils::getCurrentIdentityHeader);
+  }
 }

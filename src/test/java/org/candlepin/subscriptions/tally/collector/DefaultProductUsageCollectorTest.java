@@ -20,91 +20,59 @@
  */
 package org.candlepin.subscriptions.tally.collector;
 
-import static org.candlepin.subscriptions.tally.collector.Assertions.*;
-import static org.candlepin.subscriptions.tally.collector.TestHelper.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.candlepin.subscriptions.db.model.HardwareMeasurementType;
+import org.candlepin.subscriptions.db.model.BillingProvider;
 import org.candlepin.subscriptions.db.model.ServiceLevel;
 import org.candlepin.subscriptions.db.model.Usage;
 import org.candlepin.subscriptions.tally.UsageCalculation;
 import org.candlepin.subscriptions.tally.facts.NormalizedFacts;
 import org.junit.jupiter.api.Test;
 
-public class DefaultProductUsageCollectorTest {
+class DefaultProductUsageCollectorTest {
 
-  private DefaultProductUsageCollector collector;
+  private final ProductUsageCollector collector = new DefaultProductUsageCollector();
 
-  public DefaultProductUsageCollectorTest() {
-    collector = new DefaultProductUsageCollector();
+  @Test
+  void testBucketsHaveAsHypervisorFalse() {
+    var facts = new NormalizedFacts();
+    var bucket = collector.buildBucket(createUsageKey(), facts);
+    assertTrue(bucket.isPresent());
+    assertFalse(bucket.get().getKey().getAsHypervisor());
   }
 
   @Test
-  public void testCountsForHypervisor() {
-    // By default hypervisors are not tracked at all and therefor
-    // it is considered to be a physical machine.
-    NormalizedFacts facts = hypervisorFacts(4, 12);
-
-    UsageCalculation calc = new UsageCalculation(createUsageKey());
-    collector.collect(calc, facts);
-    assertTotalsCalculation(calc, 4, 12, 1);
-    assertPhysicalTotalsCalculation(calc, 4, 12, 1);
-    assertNullExcept(calc, HardwareMeasurementType.TOTAL, HardwareMeasurementType.PHYSICAL);
+  void testBucketSocketsSetToNull() {
+    var facts = new NormalizedFacts();
+    facts.setCores(1);
+    var bucket = collector.buildBucket(createUsageKey(), facts);
+    assertTrue(bucket.isPresent());
+    assertNull(bucket.get().getSockets());
   }
 
   @Test
-  public void testCountsForGuestWithUnknownHypervisor() {
-    NormalizedFacts facts = guestFacts(3, 12, false);
-
-    UsageCalculation calc = new UsageCalculation(createUsageKey());
-    collector.collect(calc, facts);
-
-    // A guest with a known hypervisor contributes to the overall totals,
-    // but does not contribute to the hypervisor or physical totals.
-    assertTotalsCalculation(calc, 3, 12, 1);
-    assertNullExcept(calc, HardwareMeasurementType.TOTAL);
+  void testBucketCoresSetToNull() {
+    var facts = new NormalizedFacts();
+    facts.setSockets(1);
+    var bucket = collector.buildBucket(createUsageKey(), facts);
+    assertTrue(bucket.isPresent());
+    assertNull(bucket.get().getCores());
   }
 
   @Test
-  public void testCountsForGuestWithKnownHypervisor() {
-    NormalizedFacts facts = guestFacts(3, 12, true);
-
-    UsageCalculation calc = new UsageCalculation(createUsageKey());
-    collector.collect(calc, facts);
-
-    // A guest with an unknown hypervisor contributes to the overall totals
-    // but does not contribute to the hypervisor or physical totals.
-    assertTotalsCalculation(calc, 3, 12, 1);
-    assertNullExcept(calc, HardwareMeasurementType.TOTAL);
-  }
-
-  @Test
-  public void testCountsForPhysicalSystem() {
-    NormalizedFacts facts = physicalNonHypervisor(4, 12);
-
-    UsageCalculation calc = new UsageCalculation(createUsageKey());
-    collector.collect(calc, facts);
-
-    assertTotalsCalculation(calc, 4, 12, 1);
-    assertPhysicalTotalsCalculation(calc, 4, 12, 1);
-    assertNullExcept(calc, HardwareMeasurementType.TOTAL, HardwareMeasurementType.PHYSICAL);
-  }
-
-  @Test
-  public void testCountsForCloudProvider() {
-    // Cloud provider host should contribute to the matched supported cloud provider,
-    // as well as the overall total. A cloud host should only ever contribute 1 socket
-    // along with its cores.
-    NormalizedFacts facts = cloudMachineFacts(HardwareMeasurementType.AWS, 4, 12);
-
-    UsageCalculation calc = new UsageCalculation(createUsageKey());
-    collector.collect(calc, facts);
-
-    assertTotalsCalculation(calc, 1, 12, 1);
-    assertHardwareMeasurementTotals(calc, HardwareMeasurementType.AWS, 1, 12, 1);
-    assertNullExcept(calc, HardwareMeasurementType.TOTAL, HardwareMeasurementType.AWS);
+  void testBucketHasSockets0ForMarketplaceInstance() {
+    var facts = new NormalizedFacts();
+    facts.setMarketplace(true);
+    var bucket = collector.buildBucket(createUsageKey(), facts);
+    assertTrue(bucket.isPresent());
+    assertEquals(0, bucket.get().getSockets());
   }
 
   private UsageCalculation.Key createUsageKey() {
-    return new UsageCalculation.Key("NON_RHEL", ServiceLevel.EMPTY, Usage.EMPTY);
+    return new UsageCalculation.Key(
+        "NON_RHEL", ServiceLevel.EMPTY, Usage.EMPTY, BillingProvider.EMPTY, "_ANY");
   }
 }

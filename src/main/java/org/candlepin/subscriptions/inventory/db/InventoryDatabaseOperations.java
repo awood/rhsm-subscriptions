@@ -20,15 +20,18 @@
  */
 package org.candlepin.subscriptions.inventory.db;
 
-import java.util.Collection;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+import lombok.extern.slf4j.Slf4j;
 import org.candlepin.subscriptions.inventory.db.model.InventoryHostFacts;
+import org.candlepin.subscriptions.tally.OrgHostsData;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Isolates readonly transaction for inventory database operations. */
 @Component
+@Slf4j
 public class InventoryDatabaseOperations {
 
   private final InventoryRepository repo;
@@ -38,17 +41,26 @@ public class InventoryDatabaseOperations {
   }
 
   @Transactional(value = "inventoryTransactionManager", readOnly = true)
-  public void processHostFacts(
-      Collection<String> accounts, int culledOffsetDays, Consumer<InventoryHostFacts> consumer) {
-    try (Stream<InventoryHostFacts> hostFactStream = repo.getFacts(accounts, culledOffsetDays)) {
+  public void processHost(
+      String orgId, int culledOffsetDays, Consumer<InventoryHostFacts> consumer) {
+    try (Stream<InventoryHostFacts> hostFactStream =
+        repo.getFacts(List.of(orgId), culledOffsetDays)) {
       hostFactStream.forEach(consumer::accept);
     }
   }
 
+  /* This method is transactional since we are using a Stream and keeping the cursor open requires
+  a transaction. */
   @Transactional(value = "inventoryTransactionManager", readOnly = true)
-  public void reportedHypervisors(Collection<String> accounts, Consumer<Object[]> consumer) {
-    try (Stream<Object[]> stream = repo.getReportedHypervisors(accounts)) {
-      stream.forEach(consumer::accept);
+  public void fetchReportedHypervisors(OrgHostsData orgHostsData) {
+    try (Stream<Object[]> stream = repo.getReportedHypervisors(List.of(orgHostsData.getOrgId()))) {
+      stream.forEach(
+          reported -> orgHostsData.addHostMapping((String) reported[0], (String) reported[1]));
     }
+    log.info("Found {} reported hypervisors.", orgHostsData.getHypervisorMapping().size());
+  }
+
+  public int activeSystemCountForOrgId(String orgId, int culledOffsetDays) {
+    return repo.activeSystemCountForOrgId(orgId, culledOffsetDays);
   }
 }

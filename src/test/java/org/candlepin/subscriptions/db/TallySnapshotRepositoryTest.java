@@ -22,21 +22,26 @@ package org.candlepin.subscriptions.db;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.redhat.swatch.configuration.registry.MetricId;
+import com.redhat.swatch.configuration.util.MetricIdUtils;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.candlepin.subscriptions.db.model.BillingProvider;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.db.model.HardwareMeasurement;
 import org.candlepin.subscriptions.db.model.HardwareMeasurementType;
 import org.candlepin.subscriptions.db.model.ServiceLevel;
+import org.candlepin.subscriptions.db.model.TallyMeasurementKey;
 import org.candlepin.subscriptions.db.model.TallySnapshot;
 import org.candlepin.subscriptions.db.model.Usage;
-import org.candlepin.subscriptions.json.Measurement;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
@@ -46,8 +51,9 @@ import org.springframework.transaction.annotation.Transactional;
 @SpringBootTest
 // The transactional annotation will rollback the transaction at the end of every test.
 @Transactional
+@TestInstance(Lifecycle.PER_CLASS)
 @ActiveProfiles("test")
-public class TallySnapshotRepositoryTest {
+class TallySnapshotRepositoryTest {
   private static final OffsetDateTime LONG_AGO =
       OffsetDateTime.ofInstant(Instant.EPOCH, ZoneId.systemDefault());
   private static final OffsetDateTime NOWISH =
@@ -58,25 +64,31 @@ public class TallySnapshotRepositoryTest {
   @Autowired private TallySnapshotRepository repository;
 
   @Test
-  public void testSave() {
+  void testSave() {
     TallySnapshot t =
-        createUnpersisted("Hello", "World", Granularity.DAILY, 2, 3, 4, OffsetDateTime.now());
+        createUnpersisted(
+            "orgHello", "Hello", "World", Granularity.DAILY, 2, 3, 4, OffsetDateTime.now());
     TallySnapshot saved = repository.saveAndFlush(t);
     assertNotNull(saved.getId());
   }
 
   @SuppressWarnings("linelength")
   @Test
-  public void findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsage() {
-    TallySnapshot t1 = createUnpersisted("Hello", "World", Granularity.DAILY, 2, 3, 4, NOWISH);
-    TallySnapshot t2 = createUnpersisted("Bugs", "Bunny", Granularity.DAILY, 9999, 999, 99, NOWISH);
+  void findByOrgIdAndProductIdAndGranularityAndServiceLevelAndUsage() {
+    TallySnapshot t1 =
+        createUnpersisted("orgHello", "Hello", "World", Granularity.DAILY, 2, 3, 4, NOWISH);
+    TallySnapshot t2 =
+        createUnpersisted("orgBugs", "Bugs", "Bunny", Granularity.DAILY, 9999, 999, 99, NOWISH);
     TallySnapshot t3 =
         createUnpersisted(
+            "orgBugs",
             "Bugs",
             "Bunny",
             Granularity.DAILY,
             ServiceLevel.STANDARD,
             Usage.PRODUCTION,
+            BillingProvider._ANY,
+            "sellerAcct",
             8888,
             888,
             88,
@@ -87,12 +99,14 @@ public class TallySnapshotRepositoryTest {
 
     List<TallySnapshot> found =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                "Bugs",
+            .findSnapshot(
+                "orgBugs",
                 "Bunny",
                 Granularity.DAILY,
                 ServiceLevel.STANDARD,
                 Usage.PRODUCTION,
+                BillingProvider._ANY,
+                "sellerAcct",
                 LONG_AGO,
                 FAR_FUTURE,
                 PageRequest.of(0, 10))
@@ -100,34 +114,47 @@ public class TallySnapshotRepositoryTest {
             .collect(Collectors.toList());
     assertEquals(1, found.size());
     TallySnapshot snapshot = found.get(0);
-    assertEquals("Bugs", snapshot.getAccountNumber());
+    assertEquals("orgBugs", snapshot.getOrgId());
     assertEquals("Bunny", snapshot.getProductId());
-    assertEquals("N/A", snapshot.getOwnerId());
     assertEquals(Usage.PRODUCTION, snapshot.getUsage());
     assertEquals(NOWISH, found.get(0).getSnapshotDate());
 
-    HardwareMeasurement total = snapshot.getHardwareMeasurement(HardwareMeasurementType.TOTAL);
-    assertEquals(8888, total.getCores());
+    int cores =
+        snapshot.getMeasurement(HardwareMeasurementType.TOTAL, MetricIdUtils.getCores()).intValue();
+    assertEquals(8888, cores);
   }
 
   @SuppressWarnings("linelength")
   @Test
-  public void testFindByEmptyServiceLevelAndUsage() {
+  void testFindByEmptyServiceLevelAndUsage() {
     TallySnapshot t1 =
         createUnpersisted(
-            "A1", "P1", Granularity.DAILY, ServiceLevel.EMPTY, Usage.EMPTY, 1111, 111, 11, NOWISH);
+            "orgA1",
+            "A1",
+            "P1",
+            Granularity.DAILY,
+            ServiceLevel.EMPTY,
+            Usage.EMPTY,
+            BillingProvider.EMPTY,
+            "sellerAcct",
+            1111,
+            111,
+            11,
+            NOWISH);
 
     repository.saveAll(Arrays.asList(t1));
     repository.flush();
 
     List<TallySnapshot> found =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                "A1",
+            .findSnapshot(
+                "orgA1",
                 "P1",
                 Granularity.DAILY,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 LONG_AGO,
                 FAR_FUTURE,
                 PageRequest.of(0, 10))
@@ -135,102 +162,111 @@ public class TallySnapshotRepositoryTest {
             .collect(Collectors.toList());
     assertEquals(1, found.size());
     TallySnapshot snapshot = found.get(0);
-    assertEquals("A1", snapshot.getAccountNumber());
-    assertEquals("P1", snapshot.getProductId());
-    assertEquals("N/A", snapshot.getOwnerId());
+    assertEquals("orgA1", snapshot.getOrgId());
     assertEquals(NOWISH, found.get(0).getSnapshotDate());
 
-    HardwareMeasurement total = snapshot.getHardwareMeasurement(HardwareMeasurementType.TOTAL);
-    assertEquals(1111, total.getCores());
+    int cores =
+        snapshot.getMeasurement(HardwareMeasurementType.TOTAL, MetricIdUtils.getCores()).intValue();
+    assertEquals(1111, cores);
   }
 
   @Test
-  public void testFindByAccountNumberInAndProductIdInAndGranularityAndSnapshotDateBetween() {
+  void testFindByOrgIdInAndProductIdInAndGranularityAndSnapshotDateBetween() {
     String product1 = "Product1";
     String product2 = "Product2";
     // Will not be found - out of date range.
     TallySnapshot t1 =
-        createUnpersisted("Account1", product1, Granularity.DAILY, 2, 3, 4, LONG_AGO);
+        createUnpersisted("Org1", "Account1", product1, Granularity.DAILY, 2, 3, 4, LONG_AGO);
     // Will be found.
     TallySnapshot t2 =
-        createUnpersisted("Account2", product1, Granularity.DAILY, 9, 10, 11, NOWISH);
-    // Will be found.
-    TallySnapshot t3 =
-        createUnpersisted("Account2", product2, Granularity.DAILY, 19, 20, 21, NOWISH);
+        createUnpersisted("Org1", "Account1", product1, Granularity.DAILY, 9, 10, 11, NOWISH);
     // Will not be found, incorrect granularity
-    TallySnapshot t4 =
-        createUnpersisted("Account2", product2, Granularity.WEEKLY, 19, 20, 21, NOWISH);
+    TallySnapshot t3 =
+        createUnpersisted("Org1", "Account1", product2, Granularity.WEEKLY, 19, 20, 21, NOWISH);
     // Will not be in result - Account not in query
-    TallySnapshot t5 =
-        createUnpersisted("Account3", product1, Granularity.DAILY, 99, 100, 101, FAR_FUTURE);
+    TallySnapshot t4 =
+        createUnpersisted(
+            "Org1", "Account2", product1, Granularity.DAILY, 99, 100, 101, FAR_FUTURE);
     // Will not be found - incorrect granularity
-    TallySnapshot t6 =
-        createUnpersisted("Account2", product1, Granularity.WEEKLY, 20, 22, 23, NOWISH);
+    TallySnapshot t5 =
+        createUnpersisted("Org1", "Account1", product1, Granularity.WEEKLY, 20, 22, 23, NOWISH);
 
-    repository.saveAll(Arrays.asList(t1, t2, t3, t4, t5, t6));
+    repository.saveAll(Arrays.asList(t1, t2, t3, t4, t5));
     repository.flush();
 
     OffsetDateTime min = OffsetDateTime.of(2019, 05, 23, 00, 00, 00, 00, ZoneOffset.UTC);
     OffsetDateTime max = OffsetDateTime.of(2019, 07, 23, 00, 00, 00, 00, ZoneOffset.UTC);
 
-    List<String> accounts = Arrays.asList("Account1", "Account2");
     List<String> products = Arrays.asList(product1, product2);
     List<TallySnapshot> found =
         repository
-            .findByAccountNumberInAndProductIdInAndGranularityAndSnapshotDateBetween(
-                accounts, products, Granularity.DAILY, min, max)
+            .findByOrgIdAndProductIdInAndGranularityAndSnapshotDateBetween(
+                "Org1", products, Granularity.DAILY, min, max)
             .collect(Collectors.toList());
-    // TODO Expect this to fail. Need to rebuild test result checking.
-    assertEquals(2, found.size());
+    assertEquals(1, found.size());
 
     TallySnapshot result = found.get(0);
 
-    assertEquals("Account2", result.getAccountNumber());
     assertEquals(product1, result.getProductId());
 
-    HardwareMeasurement total = result.getHardwareMeasurement(HardwareMeasurementType.TOTAL);
-    assertEquals(9, total.getCores());
-    assertEquals(10, total.getSockets());
-    assertEquals(11, total.getInstanceCount());
+    assertEquals(
+        9,
+        result.getMeasurement(HardwareMeasurementType.TOTAL, MetricIdUtils.getCores()).intValue());
+    assertEquals(
+        10,
+        result
+            .getMeasurement(HardwareMeasurementType.TOTAL, MetricIdUtils.getSockets())
+            .intValue());
+    assertEquals(
+        11,
+        result
+            .getMeasurement(HardwareMeasurementType.TOTAL, MetricIdUtils.getInstanceHours())
+            .intValue());
   }
 
   @Test
-  public void testPersistsHardwareMeasurements() {
+  void testPersistsHardwareMeasurements() {
     TallySnapshot snap =
-        createUnpersisted("Acme Inc.", "rocket-skates", Granularity.DAILY, 1, 2, 3, NOWISH);
+        createUnpersisted(
+            "OrgAcme", "Acme Inc.", "rocket-skates", Granularity.DAILY, 1, 2, 3, NOWISH);
 
-    HardwareMeasurement physical = new HardwareMeasurement();
-    physical.setCores(9);
-    physical.setSockets(8);
-    physical.setInstanceCount(7);
-    snap.setHardwareMeasurement(HardwareMeasurementType.PHYSICAL, physical);
+    snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getCores(), 9.0);
+    snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getSockets(), 8.0);
+    snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getInstanceHours(), 7.0);
 
     repository.save(snap);
     repository.flush();
 
     List<TallySnapshot> found =
         repository
-            .findByAccountNumberInAndProductIdInAndGranularityAndSnapshotDateBetween(
-                Arrays.asList("Acme Inc."),
-                Arrays.asList("rocket-skates"),
-                Granularity.DAILY,
-                LONG_AGO,
-                FAR_FUTURE)
+            .findByOrgIdAndProductIdInAndGranularityAndSnapshotDateBetween(
+                "OrgAcme", Arrays.asList("rocket-skates"), Granularity.DAILY, LONG_AGO, FAR_FUTURE)
             .collect(Collectors.toList());
 
     TallySnapshot expected = found.get(0);
-    HardwareMeasurement physicalResult =
-        expected.getHardwareMeasurement(HardwareMeasurementType.PHYSICAL);
 
-    assertEquals(9, physicalResult.getCores());
-    assertEquals(8, physicalResult.getSockets());
-    assertEquals(7, physicalResult.getInstanceCount());
+    assertEquals(
+        9,
+        expected
+            .getMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getCores())
+            .intValue());
+    assertEquals(
+        8,
+        expected
+            .getMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getSockets())
+            .intValue());
+    assertEquals(
+        7,
+        expected
+            .getMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getInstanceHours())
+            .intValue());
     assertEquals(
         Double.valueOf(1.0),
-        expected.getMeasurement(HardwareMeasurementType.TOTAL, Measurement.Uom.CORES));
+        expected.getMeasurement(HardwareMeasurementType.TOTAL, MetricIdUtils.getCores()));
   }
 
   private TallySnapshot createUnpersisted(
+      String orgId,
       String account,
       String product,
       Granularity granularity,
@@ -239,11 +275,14 @@ public class TallySnapshotRepositoryTest {
       int instances,
       OffsetDateTime date) {
     return createUnpersisted(
+        orgId,
         account,
         product,
         granularity,
         ServiceLevel.PREMIUM,
         Usage.PRODUCTION,
+        BillingProvider._ANY,
+        "sellerAcct",
         cores,
         sockets,
         instances,
@@ -251,33 +290,236 @@ public class TallySnapshotRepositoryTest {
   }
 
   private TallySnapshot createUnpersisted(
+      String orgId,
       String account,
       String product,
       Granularity granularity,
       ServiceLevel serviceLevel,
       Usage usage,
+      BillingProvider billingProvider,
+      String billingAcctId,
       int cores,
       int sockets,
       int instances,
       OffsetDateTime date) {
     TallySnapshot tally = new TallySnapshot();
-    tally.setAccountNumber(account);
+    tally.setOrgId(orgId);
     tally.setProductId(product);
-    tally.setOwnerId("N/A");
     tally.setGranularity(granularity);
     tally.setServiceLevel(serviceLevel);
     tally.setUsage(usage);
+    tally.setBillingProvider(billingProvider);
+    tally.setBillingAccountId(billingAcctId);
     tally.setSnapshotDate(date);
     tally.setServiceLevel(serviceLevel);
 
-    HardwareMeasurement total = new HardwareMeasurement();
-    total.setCores(cores);
-    total.setSockets(sockets);
-    total.setInstanceCount(instances);
+    tally.setMeasurement(HardwareMeasurementType.TOTAL, MetricIdUtils.getCores(), (double) cores);
+    tally.setMeasurement(
+        HardwareMeasurementType.TOTAL, MetricIdUtils.getSockets(), (double) sockets);
+    tally.setMeasurement(
+        HardwareMeasurementType.TOTAL, MetricIdUtils.getInstanceHours(), (double) instances);
 
-    tally.setMeasurement(HardwareMeasurementType.TOTAL, Measurement.Uom.CORES, (double) cores);
-
-    tally.setHardwareMeasurement(HardwareMeasurementType.TOTAL, total);
     return tally;
+  }
+
+  @Test
+  void testFindMonthlyTotal() {
+    //    List<TallySnapshot> tallySnapshots = new ArrayList<>();
+    String expectedOrgId = "Acme Inc.";
+    String expectedProduct = "rocket-skates";
+    Granularity expectedGranularity = Granularity.HOURLY;
+    ServiceLevel expectedServiceLevel = ServiceLevel.PREMIUM;
+    Usage expectedUsage = Usage.PRODUCTION;
+    BillingProvider expectedBillingProvider = BillingProvider._ANY;
+    String expectedBillingAccountId = "sellerAcct";
+    HardwareMeasurementType expectedMeasurementType = HardwareMeasurementType.AWS;
+    MetricId expectedMetricId = MetricIdUtils.getInstanceHours();
+
+    loadIgnoredSequencedSnapshots();
+
+    double testMeasurementValue = 2.0;
+    List<TallySnapshot> snapshots =
+        createSequencedSnapshots(
+            NOWISH,
+            5,
+            expectedOrgId,
+            expectedProduct,
+            expectedGranularity,
+            expectedMeasurementType,
+            expectedMetricId,
+            testMeasurementValue);
+
+    OffsetDateTime beginning = NOWISH;
+    OffsetDateTime ending = NOWISH.plusHours(snapshots.size());
+    TallyMeasurementKey key =
+        new TallyMeasurementKey(expectedMeasurementType, expectedMetricId.getValue());
+    Double monthlyTotal =
+        repository.sumMeasurementValueForPeriod(
+            expectedOrgId,
+            expectedProduct,
+            expectedGranularity,
+            expectedServiceLevel,
+            expectedUsage,
+            expectedBillingProvider,
+            expectedBillingAccountId,
+            beginning,
+            ending,
+            key);
+    assertEquals(snapshots.size() * testMeasurementValue, monthlyTotal);
+  }
+
+  @Test
+  void testFindMonthlyTotalForDateRange() {
+    String expectedOrgId = "Acme Inc.";
+    String expectedProduct = "rocket-skates";
+    Granularity expectedGranularity = Granularity.HOURLY;
+    ServiceLevel expectedServiceLevel = ServiceLevel.PREMIUM;
+    Usage expectedUsage = Usage.PRODUCTION;
+    BillingProvider expectedBillingProvider = BillingProvider._ANY;
+    String expectedBillingAccountId = "sellerAcct";
+    HardwareMeasurementType expectedMeasurementType = HardwareMeasurementType.AWS;
+    MetricId expectedMetricId = MetricIdUtils.getInstanceHours();
+
+    loadIgnoredSequencedSnapshots();
+
+    double testMeasurementValue = 2.0;
+    List<TallySnapshot> snapshots =
+        createSequencedSnapshots(
+            NOWISH,
+            5,
+            expectedOrgId,
+            expectedProduct,
+            expectedGranularity,
+            expectedMeasurementType,
+            expectedMetricId,
+            testMeasurementValue);
+
+    OffsetDateTime beginning = NOWISH;
+    // Don't include the last snapshot.
+    OffsetDateTime ending = NOWISH.plusHours(snapshots.size() - 2);
+    TallyMeasurementKey key =
+        new TallyMeasurementKey(
+            HardwareMeasurementType.AWS, MetricIdUtils.getInstanceHours().getValue());
+    Double monthlyTotal =
+        repository.sumMeasurementValueForPeriod(
+            expectedOrgId,
+            expectedProduct,
+            expectedGranularity,
+            expectedServiceLevel,
+            expectedUsage,
+            expectedBillingProvider,
+            expectedBillingAccountId,
+            beginning,
+            ending,
+            key);
+    assertEquals((snapshots.size() - 1) * testMeasurementValue, monthlyTotal);
+  }
+
+  @Test
+  void testFindMonthlyTotalReturnsZeroWhenNothingFound() {
+    TallyMeasurementKey key =
+        new TallyMeasurementKey(
+            HardwareMeasurementType.ALIBABA, MetricIdUtils.getInstanceHours().getValue());
+    assertEquals(
+        0.0,
+        repository.sumMeasurementValueForPeriod(
+            "org1",
+            "p1",
+            Granularity.DAILY,
+            ServiceLevel.STANDARD,
+            Usage.DEVELOPMENT_TEST,
+            BillingProvider.AWS,
+            "sa",
+            NOWISH,
+            NOWISH.plusHours(1),
+            key));
+  }
+
+  private List<TallySnapshot> createSequencedSnapshots(
+      OffsetDateTime start,
+      int numOfSnaps,
+      String orgId,
+      String product,
+      Granularity granularity,
+      HardwareMeasurementType measurementType,
+      MetricId measurementMetricId,
+      Double measurementValue) {
+    List<TallySnapshot> snaps = new ArrayList<>();
+    OffsetDateTime next = start;
+    for (int i = 1; i <= numOfSnaps; i++) {
+      TallySnapshot snap =
+          createUnpersisted(orgId, "accountSeq", product, granularity, 1, 2, 3, next);
+      snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getCores(), 1.0);
+      snap.setMeasurement(measurementType, measurementMetricId, measurementValue);
+      snaps.add(snap);
+      next = next.plusHours(1);
+    }
+    repository.saveAll(snaps);
+    repository.flush();
+    return snaps;
+  }
+
+  private void loadIgnoredSequencedSnapshots() {
+    createSequencedSnapshots(
+        NOWISH,
+        5,
+        "account1",
+        "product1",
+        Granularity.HOURLY,
+        HardwareMeasurementType.AWS,
+        MetricIdUtils.getCores(),
+        2.0);
+  }
+
+  @Test
+  void testHasLatestBillablesWhenMetricExists() {
+    TallySnapshot snap =
+        createUnpersisted(
+            "OrgAcme", "Acme Inc.", "rocket-skates", Granularity.HOURLY, 1, 2, 3, NOWISH);
+
+    snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getCores(), 9.0);
+    snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getSockets(), 8.0);
+    snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getInstanceHours(), 7.0);
+
+    repository.save(snap);
+    repository.flush();
+
+    assertTrue(
+        repository.hasLatestBillables(
+            snap.getOrgId(),
+            snap.getProductId(),
+            snap.getServiceLevel(),
+            snap.getUsage(),
+            snap.getBillingProvider(),
+            snap.getBillingAccountId(),
+            NOWISH,
+            NOWISH,
+            new TallyMeasurementKey(
+                HardwareMeasurementType.PHYSICAL, MetricIdUtils.getCores().getValue())));
+  }
+
+  @Test
+  void testDoesNotHaveLatestBillablesWhenMetricDoesNotExists() {
+    TallySnapshot snap =
+        createUnpersisted(
+            "OrgAcme", "Acme Inc.", "rocket-skates", Granularity.HOURLY, 1, 2, 3, NOWISH);
+
+    snap.setMeasurement(HardwareMeasurementType.PHYSICAL, MetricIdUtils.getSockets(), 8.0);
+
+    repository.save(snap);
+    repository.flush();
+
+    assertFalse(
+        repository.hasLatestBillables(
+            snap.getOrgId(),
+            snap.getProductId(),
+            snap.getServiceLevel(),
+            snap.getUsage(),
+            snap.getBillingProvider(),
+            snap.getBillingAccountId(),
+            NOWISH,
+            NOWISH,
+            new TallyMeasurementKey(
+                HardwareMeasurementType.PHYSICAL, MetricIdUtils.getCores().getValue())));
   }
 }

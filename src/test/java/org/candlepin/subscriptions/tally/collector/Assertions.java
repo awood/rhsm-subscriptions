@@ -24,8 +24,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.redhat.swatch.configuration.util.MetricIdUtils;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import org.candlepin.subscriptions.db.model.HardwareMeasurementType;
 import org.candlepin.subscriptions.tally.UsageCalculation;
 import org.candlepin.subscriptions.tally.UsageCalculation.Totals;
@@ -46,7 +48,13 @@ public class Assertions {
   public static void assertHypervisorTotalsCalculation(
       UsageCalculation calc, int hypSockets, int hypCores, int hypInstances) {
     assertHardwareMeasurementTotals(
-        calc, HardwareMeasurementType.VIRTUAL, hypSockets, hypCores, hypInstances);
+        calc, HardwareMeasurementType.HYPERVISOR, hypSockets, hypCores, hypInstances);
+  }
+
+  public static void assertVirtualTotalsCalculation(
+      UsageCalculation calc, int sockets, int cores, int instances) {
+    assertHardwareMeasurementTotals(
+        calc, HardwareMeasurementType.VIRTUAL, sockets, cores, instances);
   }
 
   public static void assertHardwareMeasurementTotals(
@@ -54,9 +62,21 @@ public class Assertions {
     Totals totals = calc.getTotals(type);
     assertNotNull(totals, "No totals found for " + type);
 
-    assertEquals(cores, totals.getCores());
-    assertEquals(sockets, totals.getSockets());
-    assertEquals(instances, totals.getInstances());
+    assertEquals(
+        cores,
+        Optional.ofNullable(totals.getMeasurement(MetricIdUtils.getCores()))
+            .map(Double::intValue)
+            .orElse(null));
+    assertEquals(
+        sockets,
+        Optional.ofNullable(totals.getMeasurement(MetricIdUtils.getSockets()))
+            .map(Double::intValue)
+            .orElse(null));
+    assertEquals(
+        instances,
+        Optional.ofNullable(totals.getMeasurement(MetricIdUtils.getInstanceHours()))
+            .map(Double::intValue)
+            .orElse(null));
   }
 
   public static void assertNullExcept(UsageCalculation calc, HardwareMeasurementType... types) {

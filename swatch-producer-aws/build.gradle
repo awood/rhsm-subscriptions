@@ -1,0 +1,69 @@
+plugins {
+    id 'swatch.quarkus-conventions'
+    id 'org.openapi.generator'
+}
+
+dependencies {
+    compileOnly libraries["lombok"]
+    implementation platform(libraries["awssdk-bom"])
+    implementation 'io.quarkus:quarkus-hibernate-validator'
+    implementation 'io.quarkus:quarkus-jackson'
+    implementation 'io.quarkus:quarkus-logging-json'
+    implementation 'io.quarkus:quarkus-micrometer-registry-prometheus'
+    implementation 'io.quarkus:quarkus-opentelemetry'
+    implementation 'io.quarkus:quarkus-resteasy-reactive-jackson'
+    implementation 'io.quarkus:quarkus-smallrye-fault-tolerance'
+    implementation 'io.quarkus:quarkus-smallrye-openapi'
+    implementation 'io.quarkus:quarkus-smallrye-reactive-messaging-kafka'
+    implementation 'io.quarkus:quarkus-smallrye-reactive-messaging'
+    implementation 'software.amazon.awssdk:marketplacemetering'
+    implementation 'software.amazon.awssdk:sts'
+    implementation libraries["clowder-quarkus-config-source"]
+    implementation libraries["quarkus-logging-splunk"]
+    implementation libraries["splunk-library-javalogging"]
+    implementation project(":clients:swatch-internal-subscription-client")
+    implementation project(":swatch-model-billable-usage")
+    implementation project(":swatch-common-resteasy")
+    implementation project(":swatch-product-configuration")
+    implementation project(":swatch-common-kafka")
+    implementation project(":swatch-common-resteasy-client")
+    testImplementation 'io.rest-assured:rest-assured'
+    testImplementation 'org.mockito:mockito-junit-jupiter'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'io.smallrye.reactive:smallrye-reactive-messaging-in-memory'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:testcontainers'
+    testImplementation libraries["junit-jupiter"]
+    testImplementation libraries["wiremock"]
+    testImplementation project(':swatch-common-testcontainers')
+}
+
+compileJava.dependsOn tasks.openApiGenerate
+
+openApiGenerate {
+    generatorName = "java"
+    inputSpec = "${projectDir}/src/main/resources/META-INF/openapi.yaml"
+    outputDir = "${buildDir}/generated"
+    apiPackage = "com.redhat.swatch.aws.openapi.resource"
+    modelPackage = "com.redhat.swatch.aws.openapi.model"
+    invokerPackage = "com.redhat.swatch.aws.openapi"
+    groupId = "com.redhat.swatch.aws"
+    configOptions = [
+            sourceFolder         : "src/gen/java",
+            interfaceOnly        : "true",
+            library: "microprofile",
+            java8: "true",
+            dateLibrary: "java8",
+            serializationLibrary: "jackson",
+            microprofileRestClientVersion: "3.0",
+            useJakartaEE: "true",
+    ]
+    additionalProperties = [
+            disableMultipart: "true", // see https://github.com/OpenAPITools/openapi-generator/pull/4713#issuecomment-633906581
+    ]
+    importMappings = [
+            "BillableUsage": "org.candlepin.subscriptions.billable.usage.BillableUsage"
+    ]
+}
+
+sourceSets.main.java.srcDirs += ["${buildDir}/generated/src/gen/java"]

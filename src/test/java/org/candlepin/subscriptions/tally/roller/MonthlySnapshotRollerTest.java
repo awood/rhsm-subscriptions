@@ -20,18 +20,17 @@
  */
 package org.candlepin.subscriptions.tally.roller;
 
-import java.io.IOException;
-import org.candlepin.subscriptions.FixedClockConfiguration;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.files.ProductProfileRegistry;
-import org.candlepin.subscriptions.util.ApplicationClock;
+import org.candlepin.subscriptions.test.TestClockConfiguration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,40 +39,35 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @ActiveProfiles({"api", "test"})
 @TestInstance(Lifecycle.PER_CLASS)
-public class MonthlySnapshotRollerTest {
-
+@Import(TestClockConfiguration.class)
+class MonthlySnapshotRollerTest {
   @Autowired private TallySnapshotRepository repository;
-
-  @Autowired private ProductProfileRegistry registry;
-
-  private ApplicationClock clock;
+  @Autowired private ApplicationClock clock;
 
   private SnapshotRollerTester<MonthlySnapshotRoller> tester;
 
   @BeforeAll
-  public void setupAllTests() throws IOException {
-    this.clock = new FixedClockConfiguration().fixedClock();
+  void setupAllTests() {
     this.tester =
-        new SnapshotRollerTester<>(
-            repository, new MonthlySnapshotRoller(repository, clock, registry));
+        new SnapshotRollerTester<>(repository, new MonthlySnapshotRoller(repository, clock));
   }
 
   @SuppressWarnings("indentation")
   @Test
-  public void testMonthlySnapshotProducer() {
+  void testMonthlySnapshotProducer() {
     tester.performBasicSnapshotRollerTest(
         Granularity.MONTHLY, clock.startOfCurrentMonth(), clock.endOfCurrentMonth());
   }
 
   @SuppressWarnings("indentation")
   @Test
-  public void testMonthlySnapIsUpdatedWhenItAlreadyExists() {
+  void testMonthlySnapIsUpdatedWhenItAlreadyExists() {
     tester.performSnapshotUpdateTest(
         Granularity.MONTHLY, clock.startOfCurrentMonth(), clock.endOfCurrentMonth());
   }
 
   @Test
-  public void ensureCurrentMonthlyIsNotUpdatedWhenIncomingCalculationsAreLessThanTheExisting() {
+  void ensureCurrentMonthlyIsNotUpdatedWhenIncomingCalculationsAreLessThanTheExisting() {
     tester.performUpdateWithLesserValueTest(
         Granularity.MONTHLY, clock.startOfCurrentMonth(), clock.endOfCurrentMonth(), true);
   }

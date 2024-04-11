@@ -25,36 +25,47 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.databind.util.StdDateFormat;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fasterxml.jackson.module.jaxb.JaxbAnnotationModule;
+import com.fasterxml.jackson.module.jakarta.xmlbind.JakartaXmlBindAnnotationModule;
+import com.redhat.cloud.event.parser.ConsoleCloudEventParser;
 import io.micrometer.core.aop.TimedAspect;
 import io.micrometer.core.instrument.MeterRegistry;
-import javax.validation.Validator;
+import jakarta.validation.Validator;
+import org.candlepin.subscriptions.actuator.CertInfoContributor;
 import org.candlepin.subscriptions.capacity.CapacityIngressConfiguration;
-import org.candlepin.subscriptions.conduit.ConduitConfiguration;
-import org.candlepin.subscriptions.conduit.job.OrgSyncConfiguration;
-import org.candlepin.subscriptions.marketplace.MarketplaceWorkerConfiguration;
-import org.candlepin.subscriptions.metering.MeteringConfiguration;
+import org.candlepin.subscriptions.capacity.CapacityReconciliationWorkerConfiguration;
+import org.candlepin.subscriptions.clowder.KafkaSslBeanPostProcessor;
+import org.candlepin.subscriptions.clowder.RdsSslBeanPostProcessor;
+import org.candlepin.subscriptions.db.RhsmSubscriptionsDataSourceConfiguration;
+import org.candlepin.subscriptions.json.BaseEvent;
+import org.candlepin.subscriptions.json.CleanUpEvent;
+import org.candlepin.subscriptions.json.Event;
+import org.candlepin.subscriptions.json.EventsMixin;
+import org.candlepin.subscriptions.product.OfferingWorkerConfiguration;
 import org.candlepin.subscriptions.resource.ApiConfiguration;
-import org.candlepin.subscriptions.retention.PurgeSnapshotsConfiguration;
-import org.candlepin.subscriptions.security.SecurityConfig;
+import org.candlepin.subscriptions.rhmarketplace.RhMarketplaceWorkerConfiguration;
+import org.candlepin.subscriptions.security.AuthProperties;
+import org.candlepin.subscriptions.security.SecurityConfiguration;
 import org.candlepin.subscriptions.subscription.SubscriptionServiceConfiguration;
+import org.candlepin.subscriptions.subscription.SubscriptionWorkerConfiguration;
 import org.candlepin.subscriptions.tally.TallyWorkerConfiguration;
-import org.candlepin.subscriptions.tally.job.CaptureHourlySnapshotsConfiguration;
-import org.candlepin.subscriptions.tally.job.CaptureSnapshotsConfiguration;
 import org.candlepin.subscriptions.task.TaskQueueProperties;
-import org.candlepin.subscriptions.user.UserServiceClientConfiguration;
-import org.candlepin.subscriptions.util.ApplicationClock;
-import org.candlepin.subscriptions.util.HawtioConfiguration;
 import org.candlepin.subscriptions.util.LiquibaseUpdateOnlyConfiguration;
+import org.candlepin.subscriptions.util.UtilConfiguration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.actuate.autoconfigure.info.ConditionalOnEnabledInfoContributor;
+import org.springframework.boot.actuate.autoconfigure.info.InfoContributorFallback;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -64,21 +75,19 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 @Import({
   ApiConfiguration.class,
-  ConduitConfiguration.class,
   CapacityIngressConfiguration.class,
-  CaptureSnapshotsConfiguration.class,
-  CaptureHourlySnapshotsConfiguration.class,
-  PurgeSnapshotsConfiguration.class,
   LiquibaseUpdateOnlyConfiguration.class,
   TallyWorkerConfiguration.class,
-  OrgSyncConfiguration.class,
-  MarketplaceWorkerConfiguration.class,
+  RhMarketplaceWorkerConfiguration.class,
+  SubscriptionWorkerConfiguration.class,
+  CapacityReconciliationWorkerConfiguration.class,
+  OfferingWorkerConfiguration.class,
   DevModeConfiguration.class,
-  SecurityConfig.class,
-  HawtioConfiguration.class,
-  MeteringConfiguration.class,
+  SecurityConfiguration.class,
   SubscriptionServiceConfiguration.class,
-  UserServiceClientConfiguration.class
+  // NOTE(khowell): actually not needed in RH marketplace worker
+  RhsmSubscriptionsDataSourceConfiguration.class,
+  UtilConfiguration.class,
 })
 public class ApplicationConfiguration implements WebMvcConfigurer {
   @Bean
@@ -87,10 +96,36 @@ public class ApplicationConfiguration implements WebMvcConfigurer {
   }
 
   @Bean
-  @Qualifier("marketplaceTasks")
-  @ConfigurationProperties(prefix = "rhsm-subscriptions.marketplace-tasks")
-  TaskQueueProperties tallySummaryQueueProperties() {
+  @Qualifier("syncSubscriptionTasks")
+  @ConfigurationProperties(prefix = "rhsm-subscriptions.subscription.tasks")
+  TaskQueueProperties syncSubscriptionQueueProperties() {
     return new TaskQueueProperties();
+  }
+
+  @Bean
+  @Qualifier
+  @ConfigurationProperties(prefix = "rhsm-subscriptions.subscription-prune.tasks")
+  TaskQueueProperties pruneSubscriptionTasks() {
+    return new TaskQueueProperties();
+  }
+
+  @Bean
+  @Qualifier("reconcileCapacityTasks")
+  @ConfigurationProperties(prefix = "rhsm-subscriptions.capacity.tasks")
+  TaskQueueProperties reconcileCapacityQueueProperties() {
+    return new TaskQueueProperties();
+  }
+
+  @Bean
+  @Qualifier("offeringSyncTasks")
+  @ConfigurationProperties(prefix = "rhsm-subscriptions.product.tasks")
+  TaskQueueProperties offeringSyncQueueProperties() {
+    return new TaskQueueProperties();
+  }
+
+  @Bean
+  AuthProperties authProperties() {
+    return new AuthProperties();
   }
 
   @Bean
@@ -104,28 +139,28 @@ public class ApplicationConfiguration implements WebMvcConfigurer {
     objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
     objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     objectMapper.setAnnotationIntrospector(new JacksonAnnotationIntrospector());
+    // Enable polymorphism for Event and CleanUp
+    objectMapper.addMixIn(BaseEvent.class, EventsMixin.class);
+    objectMapper.setPolymorphicTypeValidator(
+        BasicPolymorphicTypeValidator.builder()
+            .allowIfSubType(Event.class)
+            .allowIfSubType(CleanUpEvent.class)
+            .build());
 
     // Explicitly load the modules we need rather than use ObjectMapper.findAndRegisterModules in
-    // order to
-    // avoid com.fasterxml.jackson.module.scala.DefaultScalaModule, which was causing
-    // deserialization
-    // to ignore @JsonProperty on OpenApi classes.
-    objectMapper.registerModule(new JaxbAnnotationModule());
+    // order to avoid com.fasterxml.jackson.module.scala.DefaultScalaModule, which was causing
+    // deserialization to ignore @JsonProperty on OpenApi classes.
+    objectMapper.registerModule(new JakartaXmlBindAnnotationModule());
     objectMapper.registerModule(new JavaTimeModule());
     objectMapper.registerModule(new Jdk8Module());
 
     return objectMapper;
   }
 
-  @Bean
-  ApplicationClock applicationClock() {
-    return new ApplicationClock();
-  }
-
   /* Do not declare a MethodValidationPostProcessor!
    *
    * The Spring Core documents instruct the user to create a MethodValidationPostProcessor in order to
-   * enable method validation.  However, Spring Boot takes care of creating that bean that itself:
+   * enable method validation.  However, Spring Boot takes care of creating that bean itself:
    * "The method validation feature supported by Bean Validation 1.1 is automatically enabled as long as a
    * JSR-303 implementation (such as Hibernate validator) is on the classpath" (from
    * https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#boot-features-validation).
@@ -142,5 +177,35 @@ public class ApplicationConfiguration implements WebMvcConfigurer {
   @Bean
   public TimedAspect timedAspect(MeterRegistry registry) {
     return new TimedAspect(registry);
+  }
+
+  /**
+   * A bean post-processor responsible for setting up Kafka truststores correctly. It's declared
+   * here so that this bean will always be created. In other words, the creation of this bean isn't
+   * dependent on the web of Import annotations that we have declared across our Configuration
+   * classes. ApplicationConfiguration is the one Configuration class we can always count on to
+   * load.
+   *
+   * @return a KafkaJaasBeanPostProcessor object
+   */
+  @Bean
+  public KafkaSslBeanPostProcessor kafkaJaasBeanPostProcessor() {
+    return new KafkaSslBeanPostProcessor();
+  }
+
+  @Bean
+  public RdsSslBeanPostProcessor rdsSslBeanPostProcessor(Environment env) {
+    return new RdsSslBeanPostProcessor(env);
+  }
+
+  @Bean
+  @ConditionalOnEnabledInfoContributor(value = "certs", fallback = InfoContributorFallback.DISABLE)
+  public CertInfoContributor certInfoContributor(ApplicationContext context) {
+    return new CertInfoContributor(context);
+  }
+
+  @Bean
+  public ConsoleCloudEventParser cloudEventParser(@Autowired ObjectMapper objectMapper) {
+    return new ConsoleCloudEventParser(objectMapper);
   }
 }

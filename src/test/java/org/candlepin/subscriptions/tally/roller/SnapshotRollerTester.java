@@ -22,20 +22,20 @@ package org.candlepin.subscriptions.tally.roller;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.redhat.swatch.configuration.registry.MetricId;
+import com.redhat.swatch.configuration.util.MetricIdUtils;
 import java.time.OffsetDateTime;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
+import org.candlepin.subscriptions.db.model.BillingProvider;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.db.model.HardwareMeasurement;
 import org.candlepin.subscriptions.db.model.HardwareMeasurementType;
 import org.candlepin.subscriptions.db.model.ServiceLevel;
 import org.candlepin.subscriptions.db.model.TallySnapshot;
 import org.candlepin.subscriptions.db.model.Usage;
-import org.candlepin.subscriptions.json.Measurement;
 import org.candlepin.subscriptions.tally.AccountUsageCalculation;
 import org.candlepin.subscriptions.tally.UsageCalculation;
 import org.candlepin.subscriptions.tally.UsageCalculation.Totals;
@@ -44,7 +44,7 @@ import org.springframework.data.domain.PageRequest;
 /** Since the roller tests are very similar, this class provides some common test scenarios. */
 @SuppressWarnings("linelength")
 public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
-  private String testProduct = "RHEL";
+  private String testProduct = "RHEL for x86";
 
   private TallySnapshotRepository repository;
   private R roller;
@@ -68,19 +68,20 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
       OffsetDateTime startOfGranularPeriod,
       OffsetDateTime endOfGranularPeriod) {
     AccountUsageCalculation a1Calc = createTestData();
-    String account = a1Calc.getAccount();
 
     UsageCalculation a1ProductCalc = a1Calc.getCalculation(createUsageKey(getTestProduct()));
-    roller.rollSnapshots(Arrays.asList(account), Arrays.asList(a1Calc));
+    roller.rollSnapshots(a1Calc);
 
     List<TallySnapshot> currentSnaps =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                account,
+            .findSnapshot(
+                a1Calc.getOrgId(),
                 getTestProduct(),
                 granularity,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 startOfGranularPeriod,
                 endOfGranularPeriod,
                 PageRequest.of(0, 100))
@@ -96,17 +97,20 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
       OffsetDateTime startOfGranularPeriod,
       OffsetDateTime endOfGranularPeriod) {
     AccountUsageCalculation a1Calc = createTestData();
-    String account = a1Calc.getAccount();
-    roller.rollSnapshots(Arrays.asList(account), Arrays.asList(a1Calc));
+
+    String orgId = a1Calc.getOrgId();
+    roller.rollSnapshots(a1Calc);
 
     List<TallySnapshot> currentSnaps =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                account,
+            .findSnapshot(
+                orgId,
                 getTestProduct(),
                 granularity,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 startOfGranularPeriod,
                 endOfGranularPeriod,
                 PageRequest.of(0, 100))
@@ -120,16 +124,18 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
     assertSnapshot(toBeUpdated, a1ProductCalc, granularity);
 
     a1ProductCalc.addPhysical(100, 200, 50);
-    roller.rollSnapshots(Arrays.asList(account), Arrays.asList(a1Calc));
+    roller.rollSnapshots(a1Calc);
 
     List<TallySnapshot> updatedSnaps =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                account,
+            .findSnapshot(
+                orgId,
                 getTestProduct(),
                 granularity,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 startOfGranularPeriod,
                 endOfGranularPeriod,
                 PageRequest.of(0, 100))
@@ -156,25 +162,27 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
     int highSockets = 200;
     int highInstances = 10;
 
-    String account = "A1";
+    String orgId = "01";
     AccountUsageCalculation a1HighCalc =
-        createAccountCalc(account, "O1", getTestProduct(), highCores, highSockets, highInstances);
+        createAccountCalc(orgId, getTestProduct(), highCores, highSockets, highInstances);
     AccountUsageCalculation a1LowCalc =
-        createAccountCalc(account, "O1", getTestProduct(), lowCores, lowSockets, lowInstances);
+        createAccountCalc(orgId, getTestProduct(), lowCores, lowSockets, lowInstances);
 
     AccountUsageCalculation expectedCalc = expectMaxAccepted ? a1HighCalc : a1LowCalc;
 
     // Roll to the initial high values
-    roller.rollSnapshots(Arrays.asList(account), Arrays.asList(a1HighCalc));
+    roller.rollSnapshots(a1HighCalc);
 
     List<TallySnapshot> currentSnaps =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                "A1",
+            .findSnapshot(
+                orgId,
                 getTestProduct(),
                 granularity,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 startOfGranularPeriod,
                 endOfGranularPeriod,
                 PageRequest.of(0, 100))
@@ -187,16 +195,18 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
         toUpdate, a1HighCalc.getCalculation(createUsageKey(getTestProduct())), granularity);
 
     // Roll again with the low values
-    roller.rollSnapshots(Arrays.asList(account), Arrays.asList(a1LowCalc));
+    roller.rollSnapshots(a1LowCalc);
 
     List<TallySnapshot> updatedSnaps =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                account,
+            .findSnapshot(
+                orgId,
                 getTestProduct(),
                 granularity,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 startOfGranularPeriod,
                 endOfGranularPeriod,
                 PageRequest.of(0, 100))
@@ -212,51 +222,30 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
         updated, expectedCalc.getCalculation(createUsageKey(getTestProduct())), granularity);
   }
 
-  @SuppressWarnings("indentation")
-  public void performDoesNotPersistEmptySnapshots(
-      Granularity granularity,
-      OffsetDateTime startOfGranularPeriod,
-      OffsetDateTime endOfGranularPeriod) {
-
-    AccountUsageCalculation calc = createAccountCalc("12345678", "O1", getTestProduct(), 0, 0, 0);
-    roller.rollSnapshots(Collections.singletonList("12345678"), Collections.singletonList(calc));
-
-    List<TallySnapshot> currentSnaps =
-        repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                "A1",
-                getTestProduct(),
-                granularity,
-                ServiceLevel.EMPTY,
-                Usage.EMPTY,
-                startOfGranularPeriod,
-                endOfGranularPeriod,
-                PageRequest.of(0, 100))
-            .stream()
-            .collect(Collectors.toList());
-    assertEquals(0, currentSnaps.size());
-  }
-
   public void performRemovesDuplicates(
       Granularity granularity,
       OffsetDateTime startOfGranularPeriod,
       OffsetDateTime endOfGranularPeriod) {
 
     AccountUsageCalculation a1Calc = createTestData();
-    String account = a1Calc.getAccount();
+    String orgId = a1Calc.getOrgId();
 
     TallySnapshot orig = new TallySnapshot();
-    orig.setAccountNumber("my_account");
+    orig.setOrgId(orgId);
     orig.setServiceLevel(ServiceLevel.EMPTY);
     orig.setUsage(Usage.EMPTY);
+    orig.setBillingProvider(BillingProvider.EMPTY);
+    orig.setBillingAccountId("sellerAcct");
     orig.setGranularity(granularity);
     orig.setSnapshotDate(startOfGranularPeriod);
     orig.setProductId(getTestProduct());
 
     TallySnapshot dupe = new TallySnapshot();
-    dupe.setAccountNumber("my_account");
+    dupe.setOrgId(orgId);
     dupe.setServiceLevel(ServiceLevel.EMPTY);
     dupe.setUsage(Usage.EMPTY);
+    dupe.setBillingProvider(BillingProvider.EMPTY);
+    dupe.setBillingAccountId("sellerAcct");
     dupe.setGranularity(granularity);
     dupe.setSnapshotDate(startOfGranularPeriod);
     dupe.setProductId(getTestProduct());
@@ -265,12 +254,14 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
 
     List<TallySnapshot> currentSnaps =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                account,
+            .findSnapshot(
+                orgId,
                 getTestProduct(),
                 granularity,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 startOfGranularPeriod,
                 endOfGranularPeriod,
                 PageRequest.of(0, 100))
@@ -281,16 +272,18 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
     UsageCalculation a1ProductCalc = a1Calc.getCalculation(createUsageKey(getTestProduct()));
     assertNotNull(a1ProductCalc);
 
-    roller.rollSnapshots(List.of(account), List.of(a1Calc));
+    roller.rollSnapshots(a1Calc);
 
     List<TallySnapshot> updatedSnaps =
         repository
-            .findByAccountNumberAndProductIdAndGranularityAndServiceLevelAndUsageAndSnapshotDateBetweenOrderBySnapshotDate(
-                account,
+            .findSnapshot(
+                orgId,
                 getTestProduct(),
                 granularity,
                 ServiceLevel.EMPTY,
                 Usage.EMPTY,
+                BillingProvider.EMPTY,
+                "sellerAcct",
                 startOfGranularPeriod,
                 endOfGranularPeriod,
                 PageRequest.of(0, 100))
@@ -300,37 +293,30 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
   }
 
   private UsageCalculation.Key createUsageKey(String product) {
-    return new UsageCalculation.Key(product, ServiceLevel.EMPTY, Usage.EMPTY);
+    return new UsageCalculation.Key(
+        product, ServiceLevel.EMPTY, Usage.EMPTY, BillingProvider.EMPTY, "sellerAcct");
   }
 
   private AccountUsageCalculation createTestData() {
-    return createAccountCalc("my_account", "O1", getTestProduct(), 12, 24, 6);
+    return createAccountCalc("O1", getTestProduct(), 12, 24, 6);
   }
 
   private AccountUsageCalculation createAccountCalc(
-      String account,
-      String owner,
-      String product,
-      int totalCores,
-      int totalSockets,
-      int totalInstances) {
+      String orgId, String product, int totalCores, int totalSockets, int totalInstances) {
     UsageCalculation productCalc = new UsageCalculation(createUsageKey(product));
-    productCalc.addPhysical(totalCores, totalSockets, totalInstances);
-    productCalc.addHypervisor(totalCores, totalSockets, totalInstances);
-    productCalc.addCloudProvider(
-        HardwareMeasurementType.AWS, totalCores, totalSockets, totalInstances);
     Stream.of(
             HardwareMeasurementType.AWS,
             HardwareMeasurementType.PHYSICAL,
-            HardwareMeasurementType.VIRTUAL)
+            HardwareMeasurementType.VIRTUAL,
+            HardwareMeasurementType.HYPERVISOR)
         .forEach(
             type -> {
-              productCalc.add(type, Measurement.Uom.CORES, (double) totalCores);
-              productCalc.add(type, Measurement.Uom.SOCKETS, (double) totalSockets);
+              productCalc.add(type, MetricIdUtils.getCores(), (double) totalCores);
+              productCalc.add(type, MetricIdUtils.getSockets(), (double) totalSockets);
+              productCalc.add(type, MetricIdUtils.getInstanceHours(), (double) totalInstances);
             });
 
-    AccountUsageCalculation calc = new AccountUsageCalculation(account);
-    calc.setOwner(owner);
+    AccountUsageCalculation calc = new AccountUsageCalculation(orgId);
     calc.addCalculation(productCalc);
 
     return calc;
@@ -343,22 +329,15 @@ public class SnapshotRollerTester<R extends BaseSnapshotRoller> {
     assertEquals(expectedVals.getProductId(), snapshot.getProductId());
 
     for (HardwareMeasurementType type : HardwareMeasurementType.values()) {
-      HardwareMeasurement measurement = snapshot.getHardwareMeasurement(type);
       Totals expectedTotal = expectedVals.getTotals(type);
-      if (measurement == null) {
-        assertNull(expectedTotal);
-        continue;
-      }
-
-      assertNotNull(expectedTotal);
-      Arrays.stream(Measurement.Uom.values())
+      MetricId.getAll()
           .forEach(
-              uom -> {
-                assertEquals(expectedTotal.getMeasurement(uom), snapshot.getMeasurement(type, uom));
-              });
-      assertEquals(expectedTotal.getCores(), measurement.getCores());
-      assertEquals(expectedTotal.getSockets(), measurement.getSockets());
-      assertEquals(expectedTotal.getInstances(), measurement.getInstanceCount());
+              uom ->
+                  assertEquals(
+                      Optional.ofNullable(expectedTotal)
+                          .map(totals -> totals.getMeasurement(uom))
+                          .orElse(null),
+                      snapshot.getMeasurement(type, uom)));
     }
   }
 }

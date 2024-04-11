@@ -23,25 +23,19 @@ package org.candlepin.subscriptions.tally.job;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.BDDMockito.*;
 
-import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.ApplicationProperties;
-import org.candlepin.subscriptions.FixedClockConfiguration;
-import org.candlepin.subscriptions.db.AccountListSource;
-import org.candlepin.subscriptions.tally.AccountListSourceException;
+import org.candlepin.subscriptions.db.OrgConfigRepository;
 import org.candlepin.subscriptions.task.TaskDescriptor;
 import org.candlepin.subscriptions.task.TaskManagerException;
 import org.candlepin.subscriptions.task.TaskQueueProperties;
 import org.candlepin.subscriptions.task.TaskType;
 import org.candlepin.subscriptions.task.queue.inmemory.ExecutorTaskQueue;
 import org.candlepin.subscriptions.task.queue.inmemory.ExecutorTaskQueueConsumerFactory;
-import org.candlepin.subscriptions.util.ApplicationClock;
+import org.candlepin.subscriptions.test.TestClockConfiguration;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -49,7 +43,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 
 @SpringBootTest
-@ContextConfiguration(classes = FixedClockConfiguration.class)
+@ContextConfiguration(classes = TestClockConfiguration.class)
 @ActiveProfiles({"worker", "test"})
 class CaptureSnapshotsTaskManagerTest {
 
@@ -59,158 +53,130 @@ class CaptureSnapshotsTaskManagerTest {
 
   @Autowired private CaptureSnapshotsTaskManager manager;
 
-  @MockBean private AccountListSource accountListSource;
-
   @Autowired private TaskQueueProperties taskQueueProperties;
 
   @Autowired private ApplicationProperties appProperties;
 
   @Autowired ApplicationClock applicationClock;
 
-  @Test
-  void testUpdateForSingleAccount() {
-    String account = "12345";
-    manager.updateAccountSnapshots(account);
+  @MockBean private OrgConfigRepository orgRepo;
 
-    verify(queue).enqueue(eq(createDescriptor(account)));
+  public static final String ORG_ID = "org123";
+  public static final String ACCOUNT = "foo123";
+
+  @Test
+  void testUpdateForSingleOrg() {
+    manager.updateOrgSnapshots(ORG_ID);
+    verify(queue).enqueue(createDescriptorOrg(ORG_ID));
   }
 
   @Test
-  void ensureUpdateIsRunForEachAccount() throws Exception {
-    List<String> expectedAccounts = Arrays.asList("a1", "a2");
-    when(accountListSource.syncableAccounts()).thenReturn(expectedAccounts.stream());
+  void ensureUpdateIsRunForEachOrg() throws Exception {
+    List<String> expectedOrgList = Arrays.asList("o1", "o2");
+    when(orgRepo.findSyncEnabledOrgs()).thenReturn(expectedOrgList.stream());
 
-    manager.updateSnapshotsForAllAccounts();
+    manager.updateSnapshotsForAllOrg();
 
-    verify(queue, times(1)).enqueue(eq(createDescriptor(expectedAccounts)));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o1"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o2"));
   }
 
   @Test
-  void ensureAccountListIsPartitionedWhenSendingTaskMessages() throws Exception {
-    List<String> expectedAccounts = Arrays.asList("a1", "a2", "a3", "a4");
-    when(accountListSource.syncableAccounts()).thenReturn(expectedAccounts.stream());
+  void ensureOrgListIsPartitionedWhenSendingTaskMessages() throws Exception {
+    List<String> expectedOrgList = Arrays.asList("o1", "o2", "o3", "o4");
+    when(orgRepo.findSyncEnabledOrgs()).thenReturn(expectedOrgList.stream());
 
-    manager.updateSnapshotsForAllAccounts();
+    manager.updateSnapshotsForAllOrg();
 
     // NOTE: Partition size is defined in test.properties
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a1", "a2"))));
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a3", "a4"))));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o1"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o2"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o3"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o4"));
   }
 
   @Test
-  void ensureLastAccountListPartitionIsIncludedWhenSendingTaskMessages() throws Exception {
-    List<String> expectedAccounts = Arrays.asList("a1", "a2", "a3", "a4", "a5");
-    when(accountListSource.syncableAccounts()).thenReturn(expectedAccounts.stream());
+  void ensureLastOrgListPartitionIsIncludedWhenSendingTaskMessages() throws Exception {
+    List<String> expectedOrgList = Arrays.asList("o1", "o2", "o3", "o4", "o5");
+    when(orgRepo.findSyncEnabledOrgs()).thenReturn(expectedOrgList.stream());
 
-    manager.updateSnapshotsForAllAccounts();
+    manager.updateSnapshotsForAllOrg();
 
     // NOTE: Partition size is defined in test.properties
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a1", "a2"))));
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a3", "a4"))));
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a5"))));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o1"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o2"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o3"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o4"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o5"));
   }
 
   @Test
   void ensureErrorOnUpdateContinuesWithoutFailure() throws Exception {
-    List<String> expectedAccounts = Arrays.asList("a1", "a2", "a3", "a4", "a5", "a6");
-    when(accountListSource.syncableAccounts()).thenReturn(expectedAccounts.stream());
+    List<String> expectedOrgList = Arrays.asList("o1", "o2", "o3", "o4", "o5", "o6");
+    when(orgRepo.findSyncEnabledOrgs()).thenReturn(expectedOrgList.stream());
 
     doThrow(new RuntimeException("Forced!"))
         .when(queue)
-        .enqueue(eq(createDescriptor(Arrays.asList("a3", "a4"))));
+        .enqueue(createDescriptorAccount(Arrays.asList("o3", "o4")));
 
-    manager.updateSnapshotsForAllAccounts();
+    manager.updateSnapshotsForAllOrg();
 
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a1", "a2"))));
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a3", "a4"))));
-    // Even though a3,a4 throws exception, a5,a6 should be enqueued.
-    verify(queue, times(1)).enqueue(eq(createDescriptor(Arrays.asList("a5", "a6"))));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o1"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o2"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o3"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o4"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o5"));
+    verify(queue, times(1)).enqueue(createDescriptorOrg("o6"));
   }
 
   @Test
-  void ensureNoUpdatesWhenAccountListCanNotBeRetreived() throws Exception {
-    doThrow(new AccountListSourceException("Forced!", new RuntimeException()))
-        .when(accountListSource)
-        .syncableAccounts();
+  void ensureNoUpdatesWhenOrgListCanNotBeRetreived() throws Exception {
+    doThrow(new RuntimeException()).when(orgRepo).findSyncEnabledOrgs();
 
     assertThrows(
         TaskManagerException.class,
         () -> {
-          manager.updateSnapshotsForAllAccounts();
+          manager.updateSnapshotsForAllOrg();
         });
 
     verify(queue, never()).enqueue(any());
   }
 
-  /**
-   * Test hourly snapshots using the minutes offset. The offset is designed to ensure the snapshot
-   * includes as many finished tallies as possible, and allows an additional hour for them to
-   * finish.
-   *
-   * @throws Exception
-   */
   @Test
-  void testHourlySnapshotTallyOffset() throws Exception {
-    List<String> expectedAccounts = Arrays.asList("a1", "a2");
-    when(accountListSource.syncableAccounts()).thenReturn(expectedAccounts.stream());
+  void testHourlySnapshotForAllAccounts() throws Exception {
+    List<String> expectedOrgs = Arrays.asList("o1", "o2");
+    when(orgRepo.findSyncEnabledOrgs()).thenReturn(expectedOrgs.stream());
 
-    Duration metricRange = appProperties.getMetricLookupRangeDuration();
-    Duration prometheusLatencyDuration = appProperties.getPrometheusLatencyDuration();
-    Duration hourlyTallyOffsetMinutes = appProperties.getHourlyTallyOffset();
+    manager.updateHourlySnapshotsForAllOrgs();
 
-    OffsetDateTime endDateTime =
-        adjustTimeForLatency(
-            applicationClock.now().minus(hourlyTallyOffsetMinutes).truncatedTo(ChronoUnit.HOURS),
-            prometheusLatencyDuration);
-    OffsetDateTime startDateTime = endDateTime.minus(metricRange);
-
-    manager.updateHourlySnapshotsForAllAccounts();
-
-    expectedAccounts.forEach(
-        accountNumber -> {
+    expectedOrgs.forEach(
+        orgId -> {
           verify(queue, times(1))
               .enqueue(
                   TaskDescriptor.builder(
-                          TaskType.UPDATE_HOURLY_SNAPSHOTS, taskQueueProperties.getTopic())
-                      .setSingleValuedArg("accountNumber", accountNumber)
-                      // 2019-05-24T12:35Z truncated to top of the hour - 4 hours prometheus latency
-                      // - 1 hour
-                      // tally latency - 1 hour metric range
-                      .setSingleValuedArg("startDateTime", "2019-05-24T06:00:00Z")
-                      .setSingleValuedArg("endDateTime", "2019-05-24T07:00:00Z")
+                          TaskType.UPDATE_HOURLY_SNAPSHOTS, taskQueueProperties.getTopic(), null)
+                      .setSingleValuedArg("orgId", orgId)
                       .build());
         });
   }
 
-  private TaskDescriptor createDescriptor(String account) {
-    return createDescriptor(Arrays.asList(account));
+  private TaskDescriptor createDescriptorAccount(String account) {
+    return createDescriptorAccount(List.of(account));
   }
 
-  private TaskDescriptor createDescriptor(List<String> accounts) {
-    return TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, taskQueueProperties.getTopic())
+  private TaskDescriptor createDescriptorAccount(List<String> accounts) {
+    return TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, taskQueueProperties.getTopic(), null)
         .setArg("accounts", accounts)
         .build();
   }
 
-  protected OffsetDateTime adjustTimeForLatency(
-      OffsetDateTime dateTime, Duration adjustmentAmount) {
-    return dateTime.toZonedDateTime().minus(adjustmentAmount).toOffsetDateTime();
+  private TaskDescriptor createDescriptorOrg(String org) {
+    return createDescriptorOrg(List.of(org));
   }
 
-  @ParameterizedTest(name = "testAdjustTimeForLatency[{index}] {arguments}")
-  @CsvSource({
-    "2021-02-01T00:00:00Z, PT0H, 2021-02-01T00:00:00Z",
-    "2021-02-01T00:00:00Z, PT1H, 2021-01-31T23:00:00Z",
-    "2021-02-01T00:00:00Z, PT25H, 2021-01-30T23:00:00Z",
-    "2021-02-01T00:00:00Z, PT-1H, 2021-02-01T01:00:00Z",
-    "2021-02-01T00:00:00Z, PT1M, 2021-01-31T23:59:00Z",
-    "2021-02-01T00:00:00Z, P1D, 2021-01-31T00:00:00Z"
-  })
-  void testAdjustTimeForLatency(
-      OffsetDateTime originalDateTime, Duration latencyDuration, OffsetDateTime adjustedDateTime) {
-
-    OffsetDateTime actual = manager.adjustTimeForLatency(originalDateTime, latencyDuration);
-
-    assertEquals(adjustedDateTime, actual);
+  private TaskDescriptor createDescriptorOrg(List<String> orgs) {
+    return TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, taskQueueProperties.getTopic(), null)
+        .setArg("orgs", orgs)
+        .build();
   }
 }

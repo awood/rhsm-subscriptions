@@ -21,8 +21,7 @@
 package org.candlepin.subscriptions.task;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Arrays;
 import java.util.List;
@@ -30,17 +29,17 @@ import java.util.Map;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 
-public class TaskDescriptorTest {
+class TaskDescriptorTest {
 
   @Test
-  public void testCreation() {
+  void testCreation() {
     String expectedGroupId = "my-group";
     TaskType expectedTaskType = TaskType.UPDATE_SNAPSHOTS;
     String expectedArgKey = "arg1";
     List<String> expectedArgValues = Arrays.asList("1", "2", "3");
 
     TaskDescriptor desc =
-        TaskDescriptor.builder(expectedTaskType, expectedGroupId)
+        TaskDescriptor.builder(expectedTaskType, expectedGroupId, null)
             .setArg(expectedArgKey, expectedArgValues)
             .build();
 
@@ -54,40 +53,41 @@ public class TaskDescriptorTest {
   }
 
   @Test
-  public void testEquality() {
+  void testEquality() {
     TaskDescriptor d1 =
-        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1")
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1", null)
             .setSingleValuedArg("a1", "a1v")
             .build();
 
     TaskDescriptor d1Copy =
-        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1")
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1", null)
             .setSingleValuedArg("a1", "a1v")
             .build();
     assertEquals(d1, d1Copy);
 
     TaskDescriptor differentGroup =
-        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group2").build();
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group2", null).build();
     assertNotEquals(d1, differentGroup);
 
-    TaskDescriptor nullGroup = TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, null).build();
+    TaskDescriptor nullGroup =
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, null, null).build();
     assertNotEquals(d1, nullGroup);
 
-    TaskDescriptor nullType = TaskDescriptor.builder(null, "group1").build();
+    TaskDescriptor nullType = TaskDescriptor.builder(null, "group1", null).build();
     assertNotEquals(d1, nullType);
 
     TaskDescriptor argsNotEqual =
-        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1").build();
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1", null).build();
     assertNotEquals(d1, argsNotEqual);
 
     TaskDescriptor argValueNotEqual =
-        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1")
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1", null)
             .setSingleValuedArg("a1", "a1v_")
             .build();
     assertNotEquals(d1, argValueNotEqual);
 
     TaskDescriptor differentArgs =
-        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1")
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group1", null)
             .setSingleValuedArg("a2", "v2")
             .build();
     assertNotEquals(d1, differentArgs);

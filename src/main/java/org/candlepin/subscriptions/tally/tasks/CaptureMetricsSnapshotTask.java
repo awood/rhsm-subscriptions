@@ -22,31 +22,22 @@ package org.candlepin.subscriptions.tally.tasks;
 
 import org.candlepin.subscriptions.tally.TallySnapshotController;
 import org.candlepin.subscriptions.task.Task;
-import org.candlepin.subscriptions.util.DateRange;
-import org.candlepin.subscriptions.validator.ParameterDuration;
 import org.springframework.validation.annotation.Validated;
 
 /** Captures hourly metrics between a given timeframe for a given account */
 @Validated
 public class CaptureMetricsSnapshotTask implements Task {
 
-  private final String accountNumber;
+  private final String orgId;
   private final TallySnapshotController snapshotController;
-  private final DateRange dateRange;
 
-  @ParameterDuration("@jmxProperties.tallyBean.hourlyTallyDurationLimitDays")
-  public CaptureMetricsSnapshotTask(
-      TallySnapshotController snapshotController,
-      String accountNumber,
-      String startDateTime,
-      String endDateTime) {
+  public CaptureMetricsSnapshotTask(TallySnapshotController snapshotController, String orgId) {
     this.snapshotController = snapshotController;
-    this.accountNumber = accountNumber;
-    this.dateRange = DateRange.fromStrings(startDateTime, endDateTime);
+    this.orgId = orgId;
   }
 
   @Override
   public void execute() {
-    snapshotController.produceHourlySnapshotsForAccount(accountNumber, dateRange);
+    snapshotController.produceHourlySnapshotsForOrg(orgId);
   }
 }

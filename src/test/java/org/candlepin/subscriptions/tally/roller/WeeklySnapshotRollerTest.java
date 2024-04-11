@@ -20,18 +20,17 @@
  */
 package org.candlepin.subscriptions.tally.roller;
 
-import java.io.IOException;
-import org.candlepin.subscriptions.FixedClockConfiguration;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.files.ProductProfileRegistry;
-import org.candlepin.subscriptions.util.ApplicationClock;
+import org.candlepin.subscriptions.test.TestClockConfiguration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,38 +39,35 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @ActiveProfiles({"api", "test"})
 @TestInstance(Lifecycle.PER_CLASS)
-public class WeeklySnapshotRollerTest {
+@Import(TestClockConfiguration.class)
+class WeeklySnapshotRollerTest {
 
   @Autowired private TallySnapshotRepository repository;
 
-  @Autowired private ProductProfileRegistry registry;
-
-  private ApplicationClock clock;
+  @Autowired private ApplicationClock clock;
 
   private SnapshotRollerTester<WeeklySnapshotRoller> tester;
 
   @BeforeAll
-  public void setupAllTests() throws IOException {
-    this.clock = new FixedClockConfiguration().fixedClock();
+  void setupAllTests() {
     this.tester =
-        new SnapshotRollerTester<>(
-            repository, new WeeklySnapshotRoller(repository, clock, registry));
+        new SnapshotRollerTester<>(repository, new WeeklySnapshotRoller(repository, clock));
   }
 
   @Test
-  public void testWeeklySnapshotProduction() {
+  void testWeeklySnapshotProduction() {
     this.tester.performBasicSnapshotRollerTest(
         Granularity.WEEKLY, clock.startOfCurrentWeek(), clock.endOfCurrentWeek());
   }
 
   @Test
-  public void testWeeklySnapIsUpdatedWhenItAlreadyExists() {
+  void testWeeklySnapIsUpdatedWhenItAlreadyExists() {
     this.tester.performSnapshotUpdateTest(
         Granularity.WEEKLY, clock.startOfCurrentWeek(), clock.endOfCurrentWeek());
   }
 
   @Test
-  public void ensureCurrentWeeklyIsNotUpdatedWhenIncomingCalculationsAreLessThanTheExisting() {
+  void ensureCurrentWeeklyIsNotUpdatedWhenIncomingCalculationsAreLessThanTheExisting() {
     this.tester.performUpdateWithLesserValueTest(
         Granularity.WEEKLY, clock.startOfCurrentWeek(), clock.endOfCurrentWeek(), true);
   }

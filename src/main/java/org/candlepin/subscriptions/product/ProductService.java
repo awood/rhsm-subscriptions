@@ -20,12 +20,7 @@
  */
 package org.candlepin.subscriptions.product;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 import org.candlepin.subscriptions.product.api.model.EngineeringProduct;
 import org.candlepin.subscriptions.product.api.model.RESTProductTree;
@@ -37,7 +32,7 @@ import org.springframework.stereotype.Component;
 
 /** Retrieves product information. */
 @Component
-public class ProductService {
+public class ProductService implements ProductDataSource {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ProductService.class);
 
@@ -55,11 +50,16 @@ public class ProductService {
    * @return An optional containing the product tree, or an empty if the pro
    * @throws ApiException if fails to make API call
    */
+  @Override
   public Optional<RESTProductTree> getTree(String sku) throws ApiException {
     LOGGER.debug("Retrieving product tree for sku={}", sku);
     Optional<RESTProductTree> skuTree =
         Optional.ofNullable(productApi.getProductTree(sku, Boolean.TRUE));
 
+    /*
+     * Some (not all) inactive or obsolete products can be treeless. See also:
+     * https://docs.google.com/document/d/1t5OlyWanEpwXOA7ysPKuZW61cvYnIScwRMl--hmajXY/edit#heading=h.dumnkdjz1o1u
+     */
     if (skuTree.isEmpty()) {
       LOGGER.warn("sku={} does not exist, no product tree returned.", sku);
     }
@@ -72,6 +72,7 @@ public class ProductService {
     return getEngineeringProductsForSkus(skus).get(sku);
   }
 
+  @Override
   public Map<String, List<EngineeringProduct>> getEngineeringProductsForSkus(
       Collection<String> skus) throws ApiException {
     String skusQuery = String.join(",", skus);

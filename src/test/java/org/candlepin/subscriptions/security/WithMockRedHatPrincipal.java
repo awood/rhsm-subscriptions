@@ -25,8 +25,8 @@ import java.lang.annotation.RetentionPolicy;
 import org.springframework.security.test.context.support.WithSecurityContext;
 
 /**
- * Creates a mock Red Hat principal for testing, with account$value and owner$value as account
- * number and owner ID.
+ * Creates a mock Red Hat principal for testing, with account$value and orgId$value as account
+ * number and org ID.
  *
  * <p>Defaults to granting ROLE_OPT_IN, but can be overridden.
  */
@@ -35,7 +35,7 @@ import org.springframework.security.test.context.support.WithSecurityContext;
 public @interface WithMockRedHatPrincipal {
 
   /**
-   * Set account and ownerId to account$value and owner$value respectively.
+   * Set account and orgId to account$value and owner$value respectively.
    *
    * @return
    */
@@ -43,7 +43,7 @@ public @interface WithMockRedHatPrincipal {
 
   boolean nullifyAccount() default false;
 
-  boolean nullifyOwner() default false;
+  boolean nullifyOrgId() default false;
 
   String[] roles() default {"ROLE_" + RoleProvider.SWATCH_ADMIN_ROLE};
 }

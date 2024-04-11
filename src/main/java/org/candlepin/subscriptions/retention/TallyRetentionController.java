@@ -20,71 +20,46 @@
  */
 package org.candlepin.subscriptions.retention;
 
+import io.micrometer.core.annotation.Timed;
 import java.time.OffsetDateTime;
-import java.time.temporal.ChronoUnit;
-import java.util.stream.Stream;
-import org.candlepin.subscriptions.db.AccountListSource;
-import org.candlepin.subscriptions.db.EventRecordRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.tally.AccountListSourceException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 /** Cleans up stale tally snapshots for an account. */
+@Slf4j
 @Component
 public class TallyRetentionController {
-  private static final Logger log = LoggerFactory.getLogger(TallyRetentionController.class);
 
   private final TallySnapshotRepository tallySnapshotRepository;
-  private final EventRecordRepository eventRecordRepository;
   private final TallyRetentionPolicy policy;
-  private final EventRecordsRetentionProperties eventRecordsRetentionProperties;
-  private final AccountListSource accountListSource;
 
   @Autowired
   public TallyRetentionController(
-      TallySnapshotRepository tallySnapshotRepository,
-      EventRecordRepository eventRecordRepository,
-      TallyRetentionPolicy policy,
-      EventRecordsRetentionProperties eventRecordsRetentionProperties,
-      AccountListSource accountListSource) {
+      TallySnapshotRepository tallySnapshotRepository, TallyRetentionPolicy policy) {
     this.tallySnapshotRepository = tallySnapshotRepository;
-    this.eventRecordRepository = eventRecordRepository;
     this.policy = policy;
-    this.eventRecordsRetentionProperties = eventRecordsRetentionProperties;
-    this.accountListSource = accountListSource;
   }
 
-  @Transactional
-  public void purgeSnapshots() throws AccountListSourceException {
-    try (Stream<String> accountList = accountListSource.purgeReportAccounts()) {
-      accountList.forEach(this::cleanStaleSnapshotsForAccount);
-    }
-  }
-
-  public void cleanStaleSnapshotsForAccount(String accountNumber) {
-    for (Granularity granularity : Granularity.values()) {
-      OffsetDateTime cutoffDate = policy.getCutoffDate(granularity);
-      if (cutoffDate == null) {
-        continue;
+  @Timed("rhsm-subscriptions.snapshots.purge")
+  @Async("purgeTallySnapshotsJobExecutor")
+  public void purgeSnapshotsAsync() {
+    try {
+      log.info("Starting tally snapshot purge.");
+      for (Granularity granularity : Granularity.values()) {
+        OffsetDateTime cutoffDate = policy.getCutoffDate(granularity);
+        if (cutoffDate == null) {
+          continue;
+        }
+        tallySnapshotRepository.deleteAllByGranularityAndSnapshotDateBefore(
+            granularity, cutoffDate);
       }
-      tallySnapshotRepository.deleteAllByAccountNumberAndGranularityAndSnapshotDateBefore(
-          accountNumber, granularity, cutoffDate);
+      log.info("Tally snapshot purge completed successfully.");
+    } catch (Exception e) {
+      log.error("Unable to purge tally snapshots: {}", e.getMessage());
     }
-  }
-
-  public void purgeOldEventRecords() {
-    var eventRetentionDuration = eventRecordsRetentionProperties.getEventRetentionDuration();
-
-    OffsetDateTime cutoffDate =
-        OffsetDateTime.now().truncatedTo(ChronoUnit.DAYS).minus(eventRetentionDuration);
-
-    log.info("Purging event records older than Duration {}", cutoffDate);
-
-    eventRecordRepository.deleteEventRecordsByTimestampBefore(cutoffDate);
   }
 }

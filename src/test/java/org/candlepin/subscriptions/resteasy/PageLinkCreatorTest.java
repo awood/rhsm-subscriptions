@@ -20,14 +20,14 @@
  */
 package org.candlepin.subscriptions.resteasy;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
+import jakarta.ws.rs.core.UriInfo;
 import java.util.Arrays;
 import java.util.Collections;
-import javax.ws.rs.core.UriInfo;
-import org.candlepin.subscriptions.utilization.api.model.TallyReportLinks;
-import org.candlepin.subscriptions.utilization.api.model.TallySnapshot;
-import org.jboss.resteasy.specimpl.ResteasyUriBuilder;
+import org.candlepin.subscriptions.utilization.api.model.PageLinks;
+import org.jboss.resteasy.specimpl.ResteasyUriBuilderImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,14 +45,14 @@ class PageLinkCreatorTest {
 
   @BeforeEach
   void setupUriInfo() {
-    Mockito.when(uriInfo.getRequestUriBuilder()).thenReturn(new ResteasyUriBuilder());
+    Mockito.when(uriInfo.getRequestUriBuilder()).thenReturn(new ResteasyUriBuilderImpl());
   }
 
   @Test
   void testNoResultsOffsets() {
     Pageable pageable = PageRequest.of(0, 50);
-    Page<TallySnapshot> page = new PageImpl<>(Collections.emptyList(), pageable, 0);
-    TallyReportLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
+    Page<Object> page = new PageImpl<>(Collections.emptyList(), pageable, 0);
+    PageLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
     assertEquals("/?offset=0", links.getFirst());
     assertEquals("/?offset=0", links.getLast());
     assertNull(links.getPrevious());
@@ -62,12 +62,9 @@ class PageLinkCreatorTest {
   @Test
   void testPagingWorksFromFirstPage() {
     Pageable pageable = PageRequest.of(0, 1);
-    Page<TallySnapshot> page =
-        new PageImpl<>(
-            Arrays.asList(new TallySnapshot(), new TallySnapshot(), new TallySnapshot()),
-            pageable,
-            3);
-    TallyReportLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
+    Page<Object> page =
+        new PageImpl<>(Arrays.asList(new Object(), new Object(), new Object()), pageable, 3);
+    PageLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
     assertEquals("/?offset=0", links.getFirst());
     assertEquals("/?offset=2", links.getLast());
     assertNull(links.getPrevious());
@@ -77,12 +74,9 @@ class PageLinkCreatorTest {
   @Test
   void testPagingWorksFromLastPage() {
     Pageable pageable = PageRequest.of(2, 1);
-    Page<TallySnapshot> page =
-        new PageImpl<>(
-            Arrays.asList(new TallySnapshot(), new TallySnapshot(), new TallySnapshot()),
-            pageable,
-            3);
-    TallyReportLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
+    Page<Object> page =
+        new PageImpl<>(Arrays.asList(new Object(), new Object(), new Object()), pageable, 3);
+    PageLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
     assertEquals("/?offset=0", links.getFirst());
     assertEquals("/?offset=2", links.getLast());
     assertEquals("/?offset=1", links.getPrevious());
@@ -92,12 +86,9 @@ class PageLinkCreatorTest {
   @Test
   void testPagingWorksFromMiddlePage() {
     Pageable pageable = PageRequest.of(1, 1);
-    Page<TallySnapshot> page =
-        new PageImpl<>(
-            Arrays.asList(new TallySnapshot(), new TallySnapshot(), new TallySnapshot()),
-            pageable,
-            3);
-    TallyReportLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
+    Page<Object> page =
+        new PageImpl<>(Arrays.asList(new Object(), new Object(), new Object()), pageable, 3);
+    PageLinks links = new PageLinkCreator().getPaginationLinks(uriInfo, page);
     assertEquals("/?offset=0", links.getFirst());
     assertEquals("/?offset=2", links.getLast());
     assertEquals("/?offset=0", links.getPrevious());

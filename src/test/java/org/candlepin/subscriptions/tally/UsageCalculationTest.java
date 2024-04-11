@@ -20,19 +20,22 @@
  */
 package org.candlepin.subscriptions.tally;
 
-import static org.candlepin.subscriptions.tally.collector.Assertions.*;
+import static com.redhat.swatch.configuration.util.MetricIdUtils.getCores;
+import static org.candlepin.subscriptions.tally.collector.Assertions.assertHardwareMeasurementTotals;
+import static org.candlepin.subscriptions.tally.collector.Assertions.assertNullExcept;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.stream.IntStream;
+import org.candlepin.subscriptions.db.model.BillingProvider;
 import org.candlepin.subscriptions.db.model.HardwareMeasurementType;
 import org.candlepin.subscriptions.db.model.ServiceLevel;
 import org.candlepin.subscriptions.db.model.Usage;
 import org.junit.jupiter.api.Test;
 
-public class UsageCalculationTest {
+class UsageCalculationTest {
 
   @Test
-  public void testDefaults() {
+  void testDefaults() {
     UsageCalculation calculation = new UsageCalculation(createUsageKey("Test Product"));
     assertEquals("Test Product", calculation.getProductId());
 
@@ -42,7 +45,7 @@ public class UsageCalculationTest {
   }
 
   @Test
-  public void testAddToTotal() {
+  void testAddToTotal() {
     UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
     IntStream.rangeClosed(0, 4).forEach(i -> calculation.addToTotal(i + 2, i + 1, i));
 
@@ -50,8 +53,24 @@ public class UsageCalculationTest {
     assertNullExcept(calculation, HardwareMeasurementType.TOTAL);
   }
 
+  /**
+   * Added this test case due to a bug we've seen with doubles being rounded. More information in <a
+   * href="https://issues.redhat.com/browse/SWATCH-2009">SWATCH-2009</a>.
+   */
   @Test
-  public void testPhysicalSystemTotal() {
+  void testAddToTotalShouldRoundDoubleValues() {
+    UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
+    calculation.addToTotal(getCores(), 2.9);
+    calculation.addToTotal(getCores(), 3.0);
+    calculation.addToTotal(getCores(), 2.3);
+    calculation.addToTotal(getCores(), 1.4);
+    calculation.addToTotal(getCores(), 0.2);
+    assertEquals(
+        9.8, calculation.getTotals(HardwareMeasurementType.TOTAL).getMeasurement(getCores()));
+  }
+
+  @Test
+  void testPhysicalSystemTotal() {
     UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
     IntStream.rangeClosed(0, 4).forEach(i -> calculation.addPhysical(i + 2, i + 1, i));
 
@@ -61,13 +80,25 @@ public class UsageCalculationTest {
   }
 
   private UsageCalculation.Key createUsageKey(String product) {
-    return new UsageCalculation.Key(product, ServiceLevel.EMPTY, Usage.EMPTY);
+    return new UsageCalculation.Key(
+        product, ServiceLevel.EMPTY, Usage.EMPTY, BillingProvider.EMPTY, "_ANY");
   }
 
   @Test
-  public void testHypervisorTotal() {
+  void testHypervisorTotal() {
     UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
     IntStream.rangeClosed(0, 4).forEach(i -> calculation.addHypervisor(i + 2, i + 1, i));
+
+    assertHardwareMeasurementTotals(calculation, HardwareMeasurementType.HYPERVISOR, 15, 20, 10);
+    assertHardwareMeasurementTotals(calculation, HardwareMeasurementType.TOTAL, 15, 20, 10);
+    assertNullExcept(
+        calculation, HardwareMeasurementType.TOTAL, HardwareMeasurementType.HYPERVISOR);
+  }
+
+  @Test
+  void testVirtualTotal() {
+    UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
+    IntStream.rangeClosed(0, 4).forEach(i -> calculation.addUnmappedGuest(i + 2, i + 1, i));
 
     assertHardwareMeasurementTotals(calculation, HardwareMeasurementType.VIRTUAL, 15, 20, 10);
     assertHardwareMeasurementTotals(calculation, HardwareMeasurementType.TOTAL, 15, 20, 10);
@@ -75,60 +106,27 @@ public class UsageCalculationTest {
   }
 
   @Test
-  public void testAWSTotal() {
+  void testAWSTotal() {
     checkCloudProvider(HardwareMeasurementType.AWS);
   }
 
   @Test
-  public void testAlibabaTotal() {
+  void testAlibabaTotal() {
     checkCloudProvider(HardwareMeasurementType.ALIBABA);
   }
 
   @Test
-  public void testGoogleTotal() {
+  void testGoogleTotal() {
     checkCloudProvider(HardwareMeasurementType.GOOGLE);
   }
 
   @Test
-  public void testAzureTotal() {
+  void testAzureTotal() {
     checkCloudProvider(HardwareMeasurementType.AZURE);
   }
 
   @Test
-  void testAwsCloudigradeTotal() {
-    UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
-
-    calculation.addCloudigrade(HardwareMeasurementType.AWS_CLOUDIGRADE, 20);
-
-    assertHardwareMeasurementTotals(
-        calculation, HardwareMeasurementType.AWS_CLOUDIGRADE, 20, 0, 20);
-    assertHardwareMeasurementTotals(calculation, HardwareMeasurementType.TOTAL, 20, 0, 20);
-    assertNullExcept(
-        calculation, HardwareMeasurementType.TOTAL, HardwareMeasurementType.AWS_CLOUDIGRADE);
-  }
-
-  @Test
-  void testAwsWithHbiAndCloudigrade() {
-    UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
-    IntStream.rangeClosed(0, 4)
-        .forEach(
-            i -> calculation.addCloudProvider(HardwareMeasurementType.AWS, i + 100, i + 100, i));
-
-    calculation.addCloudigrade(HardwareMeasurementType.AWS_CLOUDIGRADE, 20);
-
-    assertHardwareMeasurementTotals(
-        calculation, HardwareMeasurementType.AWS_CLOUDIGRADE, 20, 0, 20);
-    assertHardwareMeasurementTotals(calculation, HardwareMeasurementType.TOTAL, 20, 0, 20);
-    assertHardwareMeasurementTotals(calculation, HardwareMeasurementType.AWS, 510, 510, 10);
-    assertNullExcept(
-        calculation,
-        HardwareMeasurementType.TOTAL,
-        HardwareMeasurementType.AWS_CLOUDIGRADE,
-        HardwareMeasurementType.AWS);
-  }
-
-  @Test
-  public void invalidCloudTypeThrowsExcpection() {
+  void invalidCloudTypeThrowsExcpection() {
     UsageCalculation calculation = new UsageCalculation(createUsageKey("Product"));
     assertThrows(
         IllegalArgumentException.class,

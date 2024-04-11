@@ -20,18 +20,17 @@
  */
 package org.candlepin.subscriptions.tally.roller;
 
-import java.io.IOException;
-import org.candlepin.subscriptions.FixedClockConfiguration;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
 import org.candlepin.subscriptions.db.model.Granularity;
-import org.candlepin.subscriptions.files.ProductProfileRegistry;
-import org.candlepin.subscriptions.util.ApplicationClock;
+import org.candlepin.subscriptions.test.TestClockConfiguration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,50 +39,39 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @ActiveProfiles({"api", "test"})
 @TestInstance(Lifecycle.PER_CLASS)
-public class DailySnapshotRollerTest {
+@Import(TestClockConfiguration.class)
+class DailySnapshotRollerTest {
 
   @Autowired private TallySnapshotRepository repository;
 
-  @Autowired private ProductProfileRegistry registry;
-
-  private ApplicationClock clock;
+  @Autowired private ApplicationClock clock;
 
   private SnapshotRollerTester<DailySnapshotRoller> tester;
 
   @BeforeAll
-  public void setupAllTests() throws IOException {
-    this.clock = new FixedClockConfiguration().fixedClock();
+  void setupAllTests() {
     this.tester =
-        new SnapshotRollerTester<>(
-            repository, new DailySnapshotRoller(repository, clock, registry));
+        new SnapshotRollerTester<>(repository, new DailySnapshotRoller(repository, clock));
   }
 
   @SuppressWarnings("indentation")
   @Test
-  public void testDailySnapshotProducer() {
+  void testDailySnapshotProducer() {
     this.tester.performBasicSnapshotRollerTest(
         Granularity.DAILY, clock.startOfToday(), clock.endOfToday());
   }
 
   @SuppressWarnings("indentation")
   @Test
-  public void testDailySnapIsUpdatedWhenItAlreadyExists() {
+  void testDailySnapIsUpdatedWhenItAlreadyExists() {
     this.tester.performSnapshotUpdateTest(
         Granularity.DAILY, clock.startOfToday(), clock.endOfToday());
   }
 
   @Test
-  public void
-      ensureCurrentDailyUpdatedRegardlessOfWhetherIncomingCalculationsAreLessThanTheExisting() {
+  void ensureCurrentDailyUpdatedRegardlessOfWhetherIncomingCalculationsAreLessThanTheExisting() {
     tester.performUpdateWithLesserValueTest(
         Granularity.DAILY, clock.startOfToday(), clock.endOfToday(), false);
-  }
-
-  @Test
-  @SuppressWarnings("java:S2699") /* NOTE(khowell): have no idea why sonar thinks no assertions */
-  public void testEmptySnapshotsNotPersisted() {
-    tester.performDoesNotPersistEmptySnapshots(
-        Granularity.DAILY, clock.startOfToday(), clock.endOfToday());
   }
 
   @Test

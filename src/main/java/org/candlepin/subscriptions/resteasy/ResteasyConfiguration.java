@@ -20,13 +20,11 @@
  */
 package org.candlepin.subscriptions.resteasy;
 
-import org.jboss.resteasy.springboot.ResteasyAutoConfiguration;
-import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
-import org.springframework.context.annotation.Bean;
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter;
+import org.springframework.boot.context.TypeExcludeFilter;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
-import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -36,28 +34,35 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * <p>Should be imported by any component that needs to serve an API.
  */
 @Configuration
-@Import(ResteasyAutoConfiguration.class)
 @ComponentScan(
     basePackages = {
       "org.candlepin.subscriptions.exception.mapper",
       "org.candlepin.subscriptions.resteasy"
+    },
+    // Prevent TestConfiguration annotated classes from being picked up by ComponentScan
+    excludeFilters = {
+      @ComponentScan.Filter(type = FilterType.CUSTOM, classes = TypeExcludeFilter.class),
+      @ComponentScan.Filter(
+          type = FilterType.CUSTOM,
+          classes = AutoConfigurationExcludeFilter.class)
     })
 public class ResteasyConfiguration implements WebMvcConfigurer {
-  @Bean
-  public static BeanFactoryPostProcessor servletInitializer() {
-    return new JaxrsApplicationServletInitializer();
-  }
-
   @Override
   public void addViewControllers(ViewControllerRegistry registry) {
     registry.addViewController("/api-docs").setViewName("redirect:/api-docs/index.html");
     registry.addViewController("/api-docs/").setViewName("redirect:/api-docs/index.html");
-  }
-
-  @Override
-  public void addResourceHandlers(ResourceHandlerRegistry registry) {
     registry
-        .addResourceHandler("/api-docs/openapi.*")
-        .addResourceLocations("classpath:openapi.yaml", "classpath:openapi.json");
+        .addViewController("/api/swatch-subscription-sync/internal/swagger-ui")
+        .setViewName("redirect:/api/swatch-subscription-sync/internal/swagger-ui/index.html");
+    registry
+        .addViewController("/api/swatch-tally/internal/swagger-ui")
+        .setViewName("redirect:/api/swatch-tally/internal/swagger-ui/index.html");
+    registry
+        .addViewController("/api/swatch-billing/internal/swagger-ui")
+        .setViewName("redirect:/api/swatch-billing/internal/swagger-ui/index.html");
+    registry
+        .addViewController("/api/swatch-producer-red-hat-marketplace/internal/swagger-ui")
+        .setViewName(
+            "redirect:/api/swatch-producer-red-hat-marketplace/internal/swagger-ui/index.html");
   }
 }

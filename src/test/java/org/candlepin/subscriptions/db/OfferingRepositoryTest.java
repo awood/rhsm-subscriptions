@@ -20,10 +20,12 @@
  */
 package org.candlepin.subscriptions.db;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.Arrays;
-import javax.transaction.Transactional;
+import jakarta.transaction.Transactional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.candlepin.subscriptions.db.model.Offering;
 import org.candlepin.subscriptions.db.model.ServiceLevel;
 import org.candlepin.subscriptions.db.model.Usage;
@@ -44,21 +46,56 @@ class OfferingRepositoryTest {
     long initialOfferingCount = repository.count();
     final Offering offering = new Offering();
     offering.setSku("testsku");
-    offering.setChildSkus(Arrays.asList("childsku1", "childsku2"));
-    offering.setProductIds(Arrays.asList(1, 2));
+    offering.setChildSkus(Set.of("childsku1", "childsku2"));
+    offering.setProductIds(Set.of(1, 2));
     offering.setUsage(Usage.DEVELOPMENT_TEST);
     offering.setServiceLevel(ServiceLevel.PREMIUM);
     offering.setRole("test");
-    offering.setPhysicalCores(1);
-    offering.setPhysicalSockets(1);
+    offering.setCores(1);
+    offering.setSockets(1);
     offering.setProductFamily("test");
     offering.setProductName("test");
+    offering.setDescription("test sku");
+    offering.setMetered(false);
     repository.save(offering);
     final Offering actual = repository.getOne("testsku");
     assertEquals(offering, actual);
-    assertEquals(offering.toString(), actual.toString());
     assertEquals(offering.hashCode(), actual.hashCode());
     repository.delete(actual);
     assertEquals(initialOfferingCount, repository.count());
+  }
+
+  @Test
+  @Transactional
+  void testFindSkusForDerivedSkus() {
+    var expectedOffering = Offering.builder().sku("foo").derivedSku("derived").build();
+    var extra = Offering.builder().sku("foo2").build();
+    repository.save(expectedOffering);
+    repository.save(extra);
+    var actual = repository.findSkusForDerivedSkus(Set.of("derived")).collect(Collectors.toSet());
+    assertEquals(Set.of("foo"), actual);
+  }
+
+  @Test
+  @Transactional
+  void testFindSkusForChildSkus() {
+    var expectedOffering = Offering.builder().sku("foo").childSkus(Set.of("child")).build();
+    var extra = Offering.builder().sku("foo2").build();
+    repository.save(expectedOffering);
+    repository.save(extra);
+    var actual = repository.findSkusForChildSku("child").collect(Collectors.toSet());
+    assertEquals(Set.of("foo"), actual);
+  }
+
+  @Test
+  @Transactional
+  void testFindAllDistinctSkus() {
+    var offering1 = Offering.builder().sku("foo").build();
+    var offering2 = Offering.builder().sku("foo2").build();
+    repository.save(offering1);
+    repository.save(offering2);
+    var actual = repository.findAllDistinctSkus();
+    assertTrue(actual.contains(offering1.getSku()));
+    assertTrue(actual.contains(offering2.getSku()));
   }
 }

@@ -20,20 +20,19 @@
  */
 package org.candlepin.subscriptions.tally;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-import org.candlepin.subscriptions.db.model.TallyMeasurementKey;
 import org.candlepin.subscriptions.db.model.TallySnapshot;
-import org.candlepin.subscriptions.json.TallyMeasurement;
 import org.candlepin.subscriptions.json.TallySummary;
-import org.candlepin.subscriptions.task.TaskQueueProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
 
 /** Component that produces tally snapshot summary messages given a list of tally snapshots. */
@@ -43,71 +42,63 @@ public class SnapshotSummaryProducer {
 
   private final String tallySummaryTopic;
   private final KafkaTemplate<String, TallySummary> tallySummaryKafkaTemplate;
+  private final RetryTemplate kafkaRetryTemplate;
+  private final TallySummaryMapper summaryMapper;
 
   @Autowired
   protected SnapshotSummaryProducer(
-      KafkaTemplate<String, TallySummary> tallySummaryKafkaTemplate,
-      @Qualifier("marketplaceTasks") TaskQueueProperties props) {
+      @Qualifier("tallySummaryKafkaTemplate")
+          KafkaTemplate<String, TallySummary> tallySummaryKafkaTemplate,
+      @Qualifier("tallySummaryKafkaRetryTemplate") RetryTemplate kafkaRetryTemplate,
+      TallySummaryProperties props,
+      TallySummaryMapper summaryMapper) {
     this.tallySummaryTopic = props.getTopic();
+    this.kafkaRetryTemplate = kafkaRetryTemplate;
     this.tallySummaryKafkaTemplate = tallySummaryKafkaTemplate;
-  }
-
-  private TallySummary createTallySummary(
-      String accountNumber, List<TallySnapshot> tallySnapshots) {
-    var mappedSnapshots =
-        tallySnapshots.stream().map(this::mapTallySnapshot).collect(Collectors.toList());
-    return new TallySummary().withAccountNumber(accountNumber).withTallySnapshots(mappedSnapshots);
-  }
-
-  private org.candlepin.subscriptions.json.TallySnapshot mapTallySnapshot(
-      TallySnapshot tallySnapshot) {
-
-    var granularity =
-        org.candlepin.subscriptions.json.TallySnapshot.Granularity.fromValue(
-            tallySnapshot.getGranularity().getValue());
-
-    var sla =
-        org.candlepin.subscriptions.json.TallySnapshot.Sla.fromValue(
-            tallySnapshot.getServiceLevel().getValue());
-
-    var usage =
-        org.candlepin.subscriptions.json.TallySnapshot.Usage.fromValue(
-            tallySnapshot.getUsage().getValue());
-
-    return new org.candlepin.subscriptions.json.TallySnapshot()
-        .withGranularity(granularity)
-        .withId(tallySnapshot.getId())
-        .withProductId(tallySnapshot.getProductId())
-        .withSnapshotDate(tallySnapshot.getSnapshotDate())
-        .withSla(sla)
-        .withUsage(usage)
-        .withTallyMeasurements(mapMeasurements(tallySnapshot.getTallyMeasurements()));
-  }
-
-  private List<TallyMeasurement> mapMeasurements(
-      Map<TallyMeasurementKey, Double> tallyMeasurements) {
-    return tallyMeasurements.entrySet().stream()
-        .map(
-            entry ->
-                new TallyMeasurement()
-                    .withHardwareMeasurementType(entry.getKey().getMeasurementType().toString())
-                    .withUom(TallyMeasurement.Uom.fromValue(entry.getKey().getUom().value()))
-                    .withValue(entry.getValue()))
-        .collect(Collectors.toList());
+    this.summaryMapper = summaryMapper;
   }
 
   public void produceTallySummaryMessages(Map<String, List<TallySnapshot>> newAndUpdatedSnapshots) {
     AtomicInteger totalTallies = new AtomicInteger();
     newAndUpdatedSnapshots.forEach(
-        (account, snapshots) ->
+        (orgId, snapshots) ->
             snapshots.stream()
-                .map(snapshot -> createTallySummary(account, List.of(snapshot)))
+                .sorted(Comparator.comparing(TallySnapshot::getSnapshotDate))
+                .map(snapshot -> summaryMapper.mapSnapshots(orgId, List.of(snapshot)))
                 .forEach(
                     summary -> {
-                      tallySummaryKafkaTemplate.send(tallySummaryTopic, summary);
-                      totalTallies.getAndIncrement();
+                      if (validateTallySummary(summary)) {
+                        kafkaRetryTemplate.execute(
+                            ctx ->
+                                tallySummaryKafkaTemplate.send(tallySummaryTopic, orgId, summary));
+                        totalTallies.getAndIncrement();
+                      }
                     }));
 
     log.info("Produced {} TallySummary messages", totalTallies);
+  }
+
+  /**
+   * Validates a TallySummary to make sure that it has all the information required by the RH
+   * marketplace API. Any issues will be logged.
+   *
+   * @param summary the summary to validate.
+   * @return true if the TallySummary is valid, false otherwise.
+   */
+  private boolean validateTallySummary(TallySummary summary) {
+    // RH Marketplace requires at least one measurement be included in the Event
+    Optional<org.candlepin.subscriptions.json.TallySnapshot> invalidDueToMeasurements =
+        summary.getTallySnapshots().stream()
+            .filter(snap -> snap.getTallyMeasurements().isEmpty())
+            .findFirst();
+    if (invalidDueToMeasurements.isPresent()) {
+      log.warn(
+          "One or more tally summary snapshots did not have measurements. "
+              + "No usage will be sent to RH marketplace for this summary.\n{}",
+          summary);
+      return false;
+    }
+
+    return true;
   }
 }

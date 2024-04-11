@@ -21,92 +21,62 @@
 package org.candlepin.subscriptions.resource;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import java.io.IOException;
-import javax.ws.rs.BadRequestException;
-import org.candlepin.subscriptions.FixedClockConfiguration;
+import jakarta.ws.rs.BadRequestException;
+import org.candlepin.subscriptions.db.OrgConfigRepository;
 import org.candlepin.subscriptions.db.model.config.OptInType;
 import org.candlepin.subscriptions.security.OptInController;
 import org.candlepin.subscriptions.security.WithMockRedHatPrincipal;
-import org.candlepin.subscriptions.tally.files.ReportingAccountWhitelist;
-import org.candlepin.subscriptions.util.ApplicationClock;
+import org.candlepin.subscriptions.test.TestClockConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
 @ActiveProfiles({"api", "test"})
 @WithMockRedHatPrincipal("123456")
-public class OptInResourceTest {
+@Import(TestClockConfiguration.class)
+class OptInResourceTest {
 
-  private ApplicationClock clock;
-
-  @MockBean private ReportingAccountWhitelist accountWhitelist;
+  @MockBean OrgConfigRepository orgConfigRepository;
 
   @MockBean private OptInController controller;
 
   @Autowired private OptInResource resource;
 
   @BeforeEach
-  public void setupTests() throws IOException {
-    this.clock = new FixedClockConfiguration().fixedClock();
-    when(accountWhitelist.hasAccount(eq("account123456"))).thenReturn(true);
+  public void setupTests() {
+    when(orgConfigRepository.existsByOrgId("owner123456")).thenReturn(true);
   }
 
   @Test
-  public void testDeleteOptInConfig() {
+  void testDeleteOptInConfig() {
     resource.deleteOptInConfig();
-    Mockito.verify(controller).optOut(eq("account123456"), eq("owner123456"));
+    Mockito.verify(controller).optOut("owner123456");
   }
 
   @Test
-  public void testGet() {
+  void testGet() {
     resource.getOptInConfig();
-    Mockito.verify(controller).getOptInConfig(eq("account123456"), eq("owner123456"));
+    Mockito.verify(controller).getOptInConfig("owner123456");
   }
 
   @Test
-  public void testPut() {
-    resource.putOptInConfig(false, false, false);
-    Mockito.verify(controller)
-        .optIn(
-            eq("account123456"),
-            eq("owner123456"),
-            eq(OptInType.API),
-            eq(Boolean.FALSE),
-            eq(Boolean.FALSE),
-            eq(Boolean.FALSE));
+  void testPut() {
+    resource.putOptInConfig();
+    Mockito.verify(controller).optIn("owner123456", OptInType.API);
   }
 
   @Test
-  public void testPutDefaultsToTrue() {
-    resource.putOptInConfig(null, null, null);
-    Mockito.verify(controller)
-        .optIn(
-            eq("account123456"),
-            eq("owner123456"),
-            eq(OptInType.API),
-            eq(Boolean.TRUE),
-            eq(Boolean.TRUE),
-            eq(Boolean.TRUE));
-  }
-
-  @Test
-  @WithMockRedHatPrincipal(value = "123456", nullifyOwner = true)
-  public void testMissingOrgOnDelete() {
-    assertThrows(BadRequestException.class, () -> resource.deleteOptInConfig());
-  }
-
-  @Test
-  @WithMockRedHatPrincipal(value = "123456", nullifyAccount = true)
-  public void testMissingAccountOnDelete() {
+  @WithMockRedHatPrincipal(value = "123456", nullifyOrgId = true)
+  void testMissingOrgOnDelete() {
     assertThrows(BadRequestException.class, () -> resource.deleteOptInConfig());
   }
 
@@ -114,19 +84,13 @@ public class OptInResourceTest {
   @WithMockRedHatPrincipal(
       value = "123456",
       roles = {})
-  public void testAccessDeniedForDeleteAccountConfigWhenUserIsNotAnAdmin() {
+  void testAccessDeniedForDeleteAccountConfigWhenUserIsNotAnAdmin() {
     assertThrows(AccessDeniedException.class, () -> resource.deleteOptInConfig());
   }
 
   @Test
-  @WithMockRedHatPrincipal(value = "123456", nullifyOwner = true)
-  public void testMissingOrgOnGet() {
-    assertThrows(BadRequestException.class, () -> resource.getOptInConfig());
-  }
-
-  @Test
-  @WithMockRedHatPrincipal(value = "123456", nullifyAccount = true)
-  public void testMissingAccountOnGet() {
+  @WithMockRedHatPrincipal(value = "123456", nullifyOrgId = true)
+  void testMissingOrgOnGet() {
     assertThrows(BadRequestException.class, () -> resource.getOptInConfig());
   }
 
@@ -134,27 +98,21 @@ public class OptInResourceTest {
   @WithMockRedHatPrincipal(
       value = "123456",
       roles = {})
-  public void testAccessDeniedForGetAccountConfigWhenUserIsNotAnAdmin() {
+  void testAccessDeniedForGetAccountConfigWhenUserIsNotAnAdmin() {
     assertThrows(AccessDeniedException.class, () -> resource.getOptInConfig());
   }
 
   @Test
-  @WithMockRedHatPrincipal(value = "123456", nullifyOwner = true)
-  public void testMissingOrgOnPut() {
-    assertThrows(BadRequestException.class, () -> resource.putOptInConfig(true, true, true));
-  }
-
-  @Test
-  @WithMockRedHatPrincipal(value = "123456", nullifyAccount = true)
-  public void testMissingAccountOnPut() {
-    assertThrows(BadRequestException.class, () -> resource.putOptInConfig(true, true, true));
+  @WithMockRedHatPrincipal(value = "123456", nullifyOrgId = true)
+  void testMissingOrgOnPut() {
+    assertThrows(BadRequestException.class, () -> resource.putOptInConfig());
   }
 
   @Test
   @WithMockRedHatPrincipal(
       value = "123456",
       roles = {})
-  public void testAccessDeniedForOptInWhenUserIsNotAnAdmin() {
-    assertThrows(AccessDeniedException.class, () -> resource.putOptInConfig(true, true, true));
+  void testAccessDeniedForOptInWhenUserIsNotAnAdmin() {
+    assertThrows(AccessDeniedException.class, () -> resource.putOptInConfig());
   }
 }

@@ -20,18 +20,18 @@
  */
 package org.candlepin.subscriptions.tally.roller;
 
-import static org.candlepin.subscriptions.db.model.Granularity.*;
+import static org.candlepin.subscriptions.db.model.Granularity.DAILY;
 
+import io.micrometer.core.annotation.Timed;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
+import org.candlepin.clock.ApplicationClock;
 import org.candlepin.subscriptions.db.TallySnapshotRepository;
 import org.candlepin.subscriptions.db.model.TallySnapshot;
-import org.candlepin.subscriptions.files.ProductProfileRegistry;
 import org.candlepin.subscriptions.tally.AccountUsageCalculation;
-import org.candlepin.subscriptions.util.ApplicationClock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -40,29 +40,30 @@ import org.springframework.transaction.annotation.Transactional;
  * new snapshot will be created. A snapshot's cores, sockets, and instances will only be updated if
  * the incoming calculated values are greater than those existing for the current day.
  */
+@Slf4j
+@Component
 public class DailySnapshotRoller extends BaseSnapshotRoller {
 
-  private static final Logger log = LoggerFactory.getLogger(DailySnapshotRoller.class);
-
-  public DailySnapshotRoller(
-      TallySnapshotRepository tallyRepo, ApplicationClock clock, ProductProfileRegistry registry) {
-    super(tallyRepo, clock, registry);
+  @Autowired
+  public DailySnapshotRoller(TallySnapshotRepository tallyRepo, ApplicationClock clock) {
+    super(tallyRepo, clock);
   }
 
+  @Timed("rhsm-subscriptions.tally.snapshots.roller.daily")
   @Override
   @Transactional
-  public Collection<TallySnapshot> rollSnapshots(
-      Collection<String> accounts, Collection<AccountUsageCalculation> accountCalcs) {
-    log.debug("Producing daily snapshots for {} account(s).", accounts.size());
+  public Collection<TallySnapshot> rollSnapshots(AccountUsageCalculation accountCalc) {
+    var orgId = accountCalc.getOrgId();
+    log.debug("Producing daily snapshots for orgId={}.", orgId);
 
-    Map<String, List<TallySnapshot>> existingSnapsForToday =
-        getCurrentSnapshotsByAccount(
-            accounts,
-            getApplicableProducts(accountCalcs, DAILY),
+    List<TallySnapshot> existingSnapsForToday =
+        getCurrentSnapshotsByOrgId(
+            orgId,
+            getApplicableProducts(accountCalc, DAILY),
             DAILY,
             clock.startOfToday(),
             clock.endOfToday());
 
-    return updateSnapshots(accountCalcs, existingSnapsForToday, DAILY);
+    return updateSnapshots(accountCalc, existingSnapsForToday, DAILY);
   }
 }

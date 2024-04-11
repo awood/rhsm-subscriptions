@@ -37,13 +37,15 @@ public class InventoryHostFacts {
   private String account;
   private String displayName;
   private String orgId;
-  private Integer cores;
-  private Integer sockets;
   private String syncTimestamp;
   private Set<String> products;
   private String systemProfileInfrastructureType;
   private Integer systemProfileCoresPerSocket;
   private Integer systemProfileSockets;
+  private Integer systemProfileCpus;
+  private Integer systemProfileThreadsPerCore;
+  private String systemProfileArch;
+  private boolean isMarketplace;
   private boolean isVirtual;
   private String hypervisorUuid;
   private String satelliteHypervisorUuid;
@@ -53,8 +55,8 @@ public class InventoryHostFacts {
   private String guestId;
   private String subscriptionManagerId;
   private String insightsId;
+  private String providerId;
   private Set<String> qpcProducts;
-  private Set<String> qpcProductIds;
   private Set<String> systemProfileProductIds;
   private String syspurposeRole;
   private String syspurposeSla;
@@ -63,27 +65,33 @@ public class InventoryHostFacts {
   private String billingModel;
   private String cloudProvider;
   private OffsetDateTime staleTimestamp;
+  private String hardwareSubmanId;
 
   public InventoryHostFacts() {
     // Used for testing
   }
 
   @SuppressWarnings("squid:S00107")
+  /**
+   * Constructor represent current query structure for reads from HBI Must be consistent with
+   * InventoryHost (Any changes here must be made in this Object. vice versa)
+   */
   public InventoryHostFacts(
       UUID inventoryId,
       OffsetDateTime modifiedOn,
       String account,
       String displayName,
       String orgId,
-      String cores,
-      String sockets,
       String products,
       String syncTimestamp,
       String systemProfileInfrastructureType,
       String systemProfileCores,
       String systemProfileSockets,
+      String systemProfileCpus,
+      String systemProfileThreadsPerCore,
+      String systemProfileArch,
+      String isMarketplace,
       String qpcProducts,
-      String qpcProductIds,
       String systemProfileProductIds,
       String syspurposeRole,
       String syspurposeSla,
@@ -99,22 +107,25 @@ public class InventoryHostFacts {
       String guestId,
       String subscriptionManagerId,
       String insightsId,
+      String providerId,
       String cloudProvider,
-      OffsetDateTime staleTimestamp) {
+      OffsetDateTime staleTimestamp,
+      String hardwareSubmanId) {
     this.inventoryId = inventoryId;
     this.modifiedOn = modifiedOn;
     this.account = account;
     this.displayName = displayName;
     this.orgId = orgId;
-    this.cores = asInt(cores);
-    this.sockets = asInt(sockets);
     this.products = asStringSet(products);
     this.qpcProducts = asStringSet(qpcProducts);
-    this.qpcProductIds = asStringSet(qpcProductIds);
     this.syncTimestamp = StringUtils.hasText(syncTimestamp) ? syncTimestamp : "";
     this.systemProfileInfrastructureType = systemProfileInfrastructureType;
     this.systemProfileCoresPerSocket = asInt(systemProfileCores);
     this.systemProfileSockets = asInt(systemProfileSockets);
+    this.systemProfileCpus = asInt(systemProfileCpus);
+    this.systemProfileThreadsPerCore = asInt(systemProfileThreadsPerCore);
+    this.systemProfileArch = systemProfileArch;
+    this.isMarketplace = asBoolean(isMarketplace);
     this.systemProfileProductIds = asStringSet(systemProfileProductIds);
     this.syspurposeRole = syspurposeRole;
     this.syspurposeSla = syspurposeSla;
@@ -129,17 +140,11 @@ public class InventoryHostFacts {
     this.guestId = guestId;
     this.subscriptionManagerId = subscriptionManagerId;
     this.insightsId = insightsId;
+    this.providerId = providerId;
     this.billingModel = billingModel;
     this.cloudProvider = cloudProvider;
     this.staleTimestamp = staleTimestamp;
-  }
-
-  public Integer getCores() {
-    return cores == null ? 0 : cores;
-  }
-
-  public Integer getSockets() {
-    return sockets == null ? 0 : sockets;
+    this.hardwareSubmanId = hardwareSubmanId;
   }
 
   public void setProducts(String products) {
@@ -175,10 +180,6 @@ public class InventoryHostFacts {
 
   public void setQpcProducts(String qpcProducts) {
     this.qpcProducts = asStringSet(qpcProducts);
-  }
-
-  public void setQpcProductIds(String qpcProductIds) {
-    this.qpcProductIds = asStringSet(qpcProductIds);
   }
 
   public void setSystemProfileProductIds(String productIds) {

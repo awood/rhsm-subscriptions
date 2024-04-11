@@ -21,12 +21,15 @@
 package org.candlepin.subscriptions;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import lombok.Getter;
 import lombok.Setter;
 import org.candlepin.subscriptions.jobs.JobProperties;
-import org.candlepin.subscriptions.security.AntiCsrfFilter;
 import org.candlepin.subscriptions.subscription.SubscriptionServiceProperties;
+import org.candlepin.subscriptions.tally.admin.InternalTallyResource;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.convert.DurationUnit;
 
 /**
  * POJO to hold property values via Spring's "Type-Safe Configuration Properties" pattern
@@ -44,8 +47,6 @@ public class ApplicationProperties {
 
   private boolean prettyPrintJson = false;
 
-  private boolean devMode = false;
-
   /** Job schedules when running in dev mode. */
   private JobProperties jobs;
 
@@ -53,23 +54,20 @@ public class ApplicationProperties {
   private String accountListResourceLocation;
 
   /**
-   * Resource location of a file containing a list of products (SKUs) to process. If not specified,
-   * all products will be processed.
+   * Resource location of a file containing a list of products (SKUs) not to process. If not
+   * specified, all products will be processed.
    */
-  private String productWhitelistResourceLocation;
+  private String productDenylistResourceLocation;
 
-  /** Resource location of a file containing the whitelisted accounts allowed to run reports. */
-  private String reportingAccountWhitelistResourceLocation;
-
-  /** Resource location of a file containing the list of product profiles */
-  private String productProfileRegistryResourceLocation;
+  /** Resource location of a file containing the allowlisted accounts allowed to run reports. */
+  private String reportingAccountAllowlistResourceLocation;
 
   /**
    * An hour based threshold used to determine whether an inventory host record's rhsm facts are
    * outdated. The host's rhsm.SYNC_TIMESTAMP fact is checked against this threshold. The default is
    * 24 hours.
    */
-  private int hostLastSyncThresholdHours = 24;
+  private Duration hostLastSyncThreshold = Duration.ofHours(24);
 
   /**
    * The batch size of account numbers that will be processed at a time while producing snapshots.
@@ -81,58 +79,29 @@ public class ApplicationProperties {
   private Duration accountListCacheTtl = Duration.ofMinutes(5);
 
   /**
-   * Amount of time to cache the product whitelist, before allowing a re-read from the filesystem.
+   * Amount of time to cache the product denylist, before allowing a re-read from the filesystem.
    */
-  private Duration productWhiteListCacheTtl = Duration.ofMinutes(5);
+  private Duration productDenyListCacheTtl = Duration.ofMinutes(5);
 
   /**
-   * Amount of time to cache the API access whitelist, before allowing a re-read from the
+   * Amount of time to cache the API access allowlist, before allowing a re-read from the
    * filesystem.
    */
-  private Duration reportingAccountWhitelistCacheTtl = Duration.ofMinutes(5);
-
-  /**
-   * Amount of time to cache the list of product profiles before allowing a re-read from the
-   * filesystem
-   */
-  private Duration productProfileListCacheTtl = Duration.ofMinutes(5);
+  private Duration reportingAccountAllowlistCacheTtl = Duration.ofMinutes(5);
 
   /**
    * The number of days after the inventory's stale_timestamp that the record will be culled.
-   * Currently HBI is calculating this value and setting it on messages. Right now the default is:
+   * Currently, HBI is calculating this value and setting it on messages. Right now the default is:
    * stale_timestamp + 14 days. Adding this as a configuration setting since we may need to adjust
    * it at some point to match.
    */
   private int cullingOffsetDays = 14;
 
   /**
-   * Expected domain suffix for origin or referer headers.
-   *
-   * @see AntiCsrfFilter
-   */
-  private String antiCsrfDomainSuffix = ".redhat.com";
-
-  /**
-   * Expected port for origin or referer headers.
-   *
-   * @see AntiCsrfFilter
-   */
-  private int antiCsrfPort = 443;
-
-  /** The base path for hawtio. Needed to serve hawtio behind a reverse proxy. */
-  private String hawtioBasePath;
-
-  /** Enable or disable cloudigrade integration. */
-  private boolean cloudigradeEnabled = false;
-
-  /** Number of times to attempt query against cloudigrade for Tally integration. */
-  private int cloudigradeMaxAttempts = 2;
-
-  /**
    * Offsets the range to look at metrics to account for delay in prometheus having metrics
    * available
    */
-  private Duration prometheusLatencyDuration = Duration.ofHours(4L);
+  private Duration prometheusLatencyDuration = Duration.ofHours(0L);
 
   /**
    * Amount of time from current timestamp to start looking for metrics during a tally, independent
@@ -152,6 +121,60 @@ public class ApplicationProperties {
   /** Additional properties related to the Subscription Service */
   private SubscriptionServiceProperties subscription = new SubscriptionServiceProperties();
 
-  /** If enabled, will sync Offerings with the upstream product service. */
-  private boolean offeringSyncEnabled = false;
+  /** If enabled, will sync Subscriptions with the upstream subscription service. */
+  private boolean subscriptionSyncEnabled = false;
+
+  /** If enabled, will allow synchronous operations when requested. */
+  private boolean enableSynchronousOperations = false;
+
+  /** Sets a hard limit on the size of accounts that HBI-based tally will attempt to process. */
+  private int tallyMaxHbiAccountSize;
+
+  /**
+   * Interval for system update flush when for reconciliation of HBI data w/ swatch system data.
+   *
+   * <p>Lower values will cause more frequent flushing, and keep memory usage low, while higher
+   * values flush less often, but consume more memory.
+   */
+  private Long hbiReconciliationFlushInterval;
+
+  /**
+   * Since the two parameters sent to {@link InternalTallyResource#performHourlyTallyForOrg(String,
+   * OffsetDateTime, OffsetDateTime, Boolean)} are actually ISO 8601 timestamps we are using a
+   * Duration rather than a Period since Duration captures time and not just dates. However, the
+   * default ChronoUnit we're using is days since that's what the range is meant to be on the order
+   * of. If the value is specified in hours (which Spring will allow: e.g. 2160h) the behavior will
+   * be strict: e.g. Daylight Saving Time will not affect it.
+   *
+   * <p>From the docs: "Durations and periods differ in their treatment of daylight savings time
+   * when added to ZonedDateTime. A Duration will add an exact number of seconds, thus a duration of
+   * one day is always exactly 24 hours. By contrast, a Period will add a conceptual day, trying to
+   * maintain the local time."
+   */
+  @DurationUnit(ChronoUnit.DAYS)
+  private Duration hourlyTallyDurationLimitDays;
+
+  /**
+   * This property enables that all the products use the new formula to calculate the number of
+   * virtual CPUs (vCPUs). If disabled, the new formula will only be used for the OpenShift
+   * Container products. See more in {@link
+   * org.candlepin.subscriptions.tally.facts.FactNormalizer#normalize}. The formula to calculate the
+   * number of virtual CPUs (vCPUs) is based on the number of threads per core which previously was
+   * hard-coded to 2.0. After <a href="https://issues.redhat.com/browse/SWATCH-80">SWATCH-80</a>,
+   * the number of threads per core is given from a new system profile fact. If absent, then we can
+   * also calculate it from another new system profile fact which is the number of CPUs. However, we
+   * are not sure if the new system profile facts are only valid for the OpenShift Container
+   * products. Therefore, we see an extreme risk of applying the new system facts to all products,
+   * so if we detect this is not the desired behaviour, we can disable this property to only apply
+   * the new system profile facts to the OpenShift Container products.
+   */
+  private boolean useCpuSystemFactsToAllProducts = true;
+
+  /**
+   * Defines the number of Events to process in a batch during the hourly tally. Since a Host update
+   * can require many DB inserts (host,buckets,measurements,monthly totals), increasing the batch
+   * size too high has a direct negative impact hourly tally performance due to the increase of
+   * resulting DB insert/update statements.
+   */
+  private int hourlyTallyEventBatchSize;
 }

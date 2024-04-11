@@ -20,19 +20,17 @@
  */
 package org.candlepin.subscriptions.db.model;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import java.util.Arrays;
-import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class OfferingTest {
 
   @Test
   void veriftySimpleGetSetTest() {
-    final List<String> skus = Arrays.asList("childsku1", "childsku2");
-    final List<Integer> productIds = Arrays.asList(1, 2);
+    final Set<String> skus = Set.of("childsku1", "childsku2");
+    final Set<Integer> productIds = Set.of(1, 2);
     final Offering offering = new Offering();
     offering.setSku("testsku");
     offering.setChildSkus(skus);
@@ -40,22 +38,22 @@ class OfferingTest {
     offering.setUsage(Usage.DEVELOPMENT_TEST);
     offering.setServiceLevel(ServiceLevel.PREMIUM);
     offering.setRole("testrole");
-    offering.setPhysicalCores(2);
-    offering.setPhysicalSockets(3);
-    offering.setVirtualCores(4);
-    offering.setVirtualSockets(5);
+    offering.setCores(2);
+    offering.setSockets(3);
+    offering.setHypervisorCores(4);
+    offering.setHypervisorSockets(5);
     offering.setProductFamily("testproductfamily");
     offering.setProductName("testproductname");
     assertEquals("testsku", offering.getSku());
-    assertArrayEquals(skus.toArray(), offering.getChildSkus().toArray());
-    assertArrayEquals(productIds.toArray(), offering.getProductIds().toArray());
+    assertEquals(skus, offering.getChildSkus());
+    assertEquals(productIds, offering.getProductIds());
     assertEquals(Usage.DEVELOPMENT_TEST, offering.getUsage());
     assertEquals(ServiceLevel.PREMIUM, offering.getServiceLevel());
     assertEquals("testrole", offering.getRole());
-    assertEquals(2, offering.getPhysicalCores());
-    assertEquals(3, offering.getPhysicalSockets());
-    assertEquals(4, offering.getVirtualCores());
-    assertEquals(5, offering.getVirtualSockets());
+    assertEquals(2, offering.getCores());
+    assertEquals(3, offering.getSockets());
+    assertEquals(4, offering.getHypervisorCores());
+    assertEquals(5, offering.getHypervisorSockets());
     assertEquals("testproductfamily", offering.getProductFamily());
     assertEquals("testproductname", offering.getProductName());
   }

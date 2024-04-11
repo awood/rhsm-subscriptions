@@ -3,130 +3,46 @@
 # getting loaded.
 # See https://docs.spring.io/spring-boot/docs/current/reference/html/boot-features-external-config.html#boot-features-external-config-application-property-files
 
-resteasy:
-  jaxrs:
-    app:
-      registration: property
-      classes: org.candlepin.subscriptions.resteasy.JaxrsApplication
-management:
-  endpoints:
-    web:
-      exposure:
-        include:
-          - hawtio
-          - health
-          - info
-          - jolokia
-          - prometheus
-  endpoint:
-    shutdown:
-      enabled: true
-    prometheus:
-      enabled: true
-
 spring:
-  # general hibernate configurations
-  jmx:
-    enabled: ${JMX_ENABLED:true}
-  jpa:
-    properties:
-      hibernate:
-        jdbc:
-          batch_size: ${JDBC_BATCH_SIZE:100}
-        order_inserts: true
-        order_updates: true
+  # load the common core definitions
+  config:
+    import: classpath:swatch-core/application.yaml
   profiles:
     active:
       - api
       - capacity-ingress
       - rhsm-conduit
       - worker
-      - openshift-metering-worker
-      - marketplace
+      - rh-marketplace
       - kafka-queue
-  liquibase:
-    change-log: classpath:/liquibase/changelog.xml
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_HOST:localhost}:${KAFKA_BOOTSTRAP_PORT:9092}
+  jms:
     listener:
-      # The number of threads that will be processing messages (should match
-      # the number of partitions on the queue)
-      concurrency: ${KAFKA_MESSAGE_THREADS:1}
-      idle-event-interval: ${KAFKA_IDLE_EVENT_INTERVAL:5s}
-    consumer:
-      properties:
-        # Required kafka defaults
-        max.poll.interval.ms: ${KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS:1800000}
-        reconnect.backoff.ms: ${KAFKA_CONSUMER_RECONNECT_BACKOFF_MS:2000}
-        reconnect.backoff.max.ms: ${KAFKA_CONSUMER_RECONNECT_BACKOFF_MAX_MS:10000}
-        default.api.timeout.ms: ${KAFKA_API_RECONNECT_TIMEOUT_MS:480000}
-      # if no offset commit exists yet, set to earliest
-      auto-offset-reset: earliest
-      max-poll-records: 1
-
-# See https://hawt.io/docs/configuration/ for details on built-in hawtio config
-hawtio:
-  # disable the remote connection tab, we do not need it
-  disableProxy: ${HAWTIO_DISABLE_PROXY:true}
-  authenticationEnabled: ${HAWTIO_AUTHENTICATION_ENABLED:false}
-  proxyAllowlist: ${HAWTIO_PROXY_ALLOWLIST:localhost,127.0.0.1}
-  localAddressProbing: ${HAWTIO_LOCAL_ADDRESS_PROBING:true}
+      auto-startup: ${UMB_ENABLED:false}
 
 rhsm-subscriptions:
-  dev-mode: ${DEV_MODE:false}
-  package_uri_mappings:
-    # this mapping required here because it is used by our SecurityConfig, which is shared
-    org.candlepin.subscriptions.resteasy: ${PATH_PREFIX:api}/${APP_NAME:rhsm-subscriptions}/v1
-  product-profile-registry-resource-location: classpath:product_profile_registry.yaml
-  datasource:
-    url: jdbc:postgresql://${DATABASE_HOST:localhost}:${DATABASE_PORT:5432}/${DATABASE_DATABASE:rhsm-subscriptions}?reWriteBatchedInserts=true&stringtype=unspecified&sslmode=${DATABASE_SSL_MODE:disable}&sslrootcert=${DATABASE_SSL_CERT:/dev/null}
-    username: ${DATABASE_USERNAME:rhsm-subscriptions}
-    password: ${DATABASE_PASSWORD:rhsm-subscriptions}
-    driver-class-name: org.postgresql.Driver
-    platform: postgresql
-    hikari:
-      connection-timeout: ${DATABASE_CONNECTION_TIMEOUT_MS:30000}
-      maximum-pool-size: ${DATABASE_MAX_POOL_SIZE:10}
   jobs:
-    capture-hourly-snapshot-schedule: ${CAPTURE_HOURLY_SNAPSHOT_SCHEDULE:0 0 * * * ?}
-    capture-snapshot-schedule: ${CAPTURE_SNAPSHOT_SCHEDULE:0 0 1 * * ?}
-    purge-snapshot-schedule: ${PURGE_SNAPSHOT_SCHEDULE:0 0 1 * * ?}
-    metering-schedule: ${METERING_SCHEDULE:0 0 1 * * ?}
+    purge-snapshot-schedule: ${PURGE_SNAPSHOT-SCHEDULE:0 0 1 * * ?}
+    purge-events-schedule: ${PURGE_EVENTS_SCHEDULE:0 0 1 * * ?}
   account-batch-size: ${ACCOUNT_BATCH_SIZE:1}
-  tasks:
-    topic: ${KAFKA_TOPIC:platform.rhsm-subscriptions.tasks}
-    kafka-group-id: ${KAFKA_GROUP_ID:rhsm-subscriptions-task-processor}
-    seek-override-end: ${KAFKA_SEEK_OVERRIDE_END:false}
-    seek-override-timestamp: ${KAFKA_SEEK_OVERRIDE_TIMESTAMP:}
-  # Base path override for reverse proxy support
-  hawtio-base-path: ${HAWTIO_BASE_PATH:}
-  metering:
-    prometheus:
-      client:
-        token: ${PROM_AUTH_TOKEN:}
-        url: ${PROM_URL:https://localhost/api/v1}
-      metric:
-        openshift:
-          enabledAccountPromQL: >-
-            ${OPENSHIFT_ENABLED_ACCOUNT_PROMQL:group(min_over_time(subscription_labels{ebs_account != '', billing_model='marketplace'}[1h]))
-            by (ebs_account)}
-    tasks:
-      topic: ${METERING_TASK_TOPIC:platform.rhsm-subscriptions.metering-tasks}
-      kafka-group-id: ${METERING_TASK_GROUP_ID:metering-task-processor}
-      seek-override-end: ${KAFKA_SEEK_OVERRIDE_END:false}
-      seek-override-timestamp: ${KAFKA_SEEK_OVERRIDE_TIMESTAMP:}
-  prometheus-latency-duration: ${PROMETHEUS_LATENCY_DURATION:4h}
+  product-denylist-resource-location: ${PRODUCT_DENYLIST_RESOURCE_LOCATION:}
   hourly-tally-offset: ${HOURLY_TALLY_OFFSET:60m}
   metric-lookup-range-duration: ${METRIC_LOOKUP_RANGE:1h}
+  subscription-sync-enabled: ${SUBSCRIPTION_SYNC_ENABLED:false}
+  enable-synchronous-operations: ${ENABLE_SYNCHRONOUS_OPERATIONS:false}
   subscription:
-    useStub: ${SUBSCRIPTION_USE_STUB:false}
-    url: ${SUBSCRIPTION_URL:https://subscription.qa.api.redhat.com/svcrest/subscription/v5}
+    use-stub: ${SUBSCRIPTION_USE_STUB:false}
+    url: ${SUBSCRIPTION_URL:https://subscription.stage.api.redhat.com/svcrest/subscription/v5}
     keystore: file:${SUBSCRIPTION_KEYSTORE:}
-    keystorePassword: ${SUBSCRIPTION_KEYSTORE_PASSWORD:changeit}
-    maxConnections: ${SUBSCRIPTION_MAX_CONNECTIONS:100}
-    backOffInitialInterval: ${SUBSCRIPTION_BACKOFF_INITIAL_INTERVAL:1s}
-    maxRetryAttempts: ${SUBSCRIPTION_MAX_RETRY_ATTEMPTS:4}
-    pageSize: ${SUBSCRIPTION_PAGE_SIZE:500}
+    keystore-password: ${SUBSCRIPTION_KEYSTORE_PASSWORD:changeit}
+    max-connections: ${SUBSCRIPTION_MAX_CONNECTIONS:100}
+    max-retry-attempts: ${SUBSCRIPTION_MAX_RETRY_ATTEMPTS:4}
+    back-off-max-interval: ${SUBSCRIPTION_BACK_OFF_MAX_INTERVAL:64s}
+    back-off-initial-interval: ${SUBSCRIPTION_BACK_OFF_INITIAL_INTERVAL:1s}
+    back-off-multiplier: ${SUBSCRIPTION_BACK_OFF_MULTIPLIER:2}
+    page-size: ${SUBSCRIPTION_PAGE_SIZE:1000}
+    ignore-expired-older-than: ${SUBSCRIPTION_IGNORE_EXPIRED_OLDER_THAN:2m}
+    ignore-starting-later-than: ${SUBSCRIPTION_IGNORE_STARTING_LATER_THAN:2m}
+    enable-payg-subscription-force-sync: ${ENABLE_PAYG_SUBSCRIPTION_FORCE_SYNC:false}
   user-service:
     use-stub: ${USER_USE_STUB:false}
     url: https://${USER_HOST:localhost}:${USER_PORT:443}
@@ -137,8 +53,18 @@ rhsm-subscriptions:
     back-off-max-interval: ${USER_BACK_OFF_MAX_INTERVAL:1m}
     back-off-multiplier: ${USER_BACK_OFF_MULTIPLIER:2}
     max-attempts: ${USER_MAX_ATTEMPTS:1}
-  marketplace-tasks:
-    topic: platform.rhsm-subscriptions.tally
-    kafka-group-id: marketplace-worker
-    seek-override-end: ${KAFKA_SEEK_OVERRIDE_END:false}
-    seek-override-timestamp: ${KAFKA_SEEK_OVERRIDE_TIMESTAMP:}
+management:
+  health:
+    jms:
+      # disable activemq health checks when we're not actually using UMB
+      enabled: ${UMB_ENABLED:false}
+
+#Current version of spring-kafka(3.0.10) has bug that logs incorrect warning: https://github.com/spring-projects/spring-kafka/issues/2784
+#TODO remove this. Fixed in next release
+logging:
+  level:
+    org:
+      springframework:
+        kafka:
+          listener:
+            DeadLetterPublishingRecoverer=error:

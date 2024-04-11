@@ -30,37 +30,40 @@ import org.candlepin.subscriptions.tally.facts.NormalizedFacts;
 public class DefaultProductUsageCollector implements ProductUsageCollector {
 
   @Override
-  public Optional<HostTallyBucket> collect(
-      UsageCalculation prodCalc, NormalizedFacts normalizedFacts) {
-    int appliedCores = normalizedFacts.getCores() != null ? normalizedFacts.getCores() : 0;
-    int appliedSockets = normalizedFacts.getSockets() != null ? normalizedFacts.getSockets() : 0;
+  public Optional<HostTallyBucket> buildBucket(
+      UsageCalculation.Key key, NormalizedFacts normalizedFacts) {
+    Integer appliedCores = normalizedFacts.getCores();
+    Integer appliedSockets = normalizedFacts.getSockets();
 
     HardwareMeasurementType appliedType = null;
+
     // Cloud provider hosts only account for a single socket.
     if (normalizedFacts.getCloudProviderType() != null) {
-      appliedSockets = 1;
+      appliedSockets = normalizedFacts.isMarketplace() ? 0 : 1;
       appliedType = normalizedFacts.getCloudProviderType();
-      prodCalc.addCloudProvider(
-          normalizedFacts.getCloudProviderType(), appliedCores, appliedSockets, 1);
     }
     // Accumulate for physical systems.
     else if (!normalizedFacts.isVirtual()) {
+      appliedSockets = normalizedFacts.isMarketplace() ? (Integer) 0 : appliedSockets;
       appliedType = HardwareMeasurementType.PHYSICAL;
-      prodCalc.addPhysical(appliedCores, appliedSockets, 1);
     }
     // Any other system is considered virtual
     else {
+      if (normalizedFacts.isMarketplace()) {
+        appliedSockets = 0;
+      }
       appliedType = HardwareMeasurementType.VIRTUAL;
-      prodCalc.addToTotal(appliedCores, appliedSockets, 1);
     }
 
     HostTallyBucket appliedBucket =
         new HostTallyBucket(
             null,
-            prodCalc.getProductId(),
-            prodCalc.getSla(),
-            prodCalc.getUsage(),
-            true,
+            key.getProductId(),
+            key.getSla(),
+            key.getUsage(),
+            key.getBillingProvider(),
+            key.getBillingAccountId(),
+            false,
             appliedCores,
             appliedSockets,
             appliedType);
@@ -69,10 +72,14 @@ public class DefaultProductUsageCollector implements ProductUsageCollector {
   }
 
   @Override
-  public Optional<HostTallyBucket> collectForHypervisor(
-      String account, UsageCalculation prodCalc, NormalizedFacts hypervisorFacts) {
-
+  public Optional<HostTallyBucket> buildBucketForHypervisor(
+      UsageCalculation.Key key, NormalizedFacts hypervisorFacts) {
     /* do nothing for hypervisor-guest mappings by default */
     return Optional.empty();
+  }
+
+  @Override
+  public void collectForHypervisor(UsageCalculation prodCalc, NormalizedFacts hypervisorFacts) {
+    // Intentionally left blank
   }
 }

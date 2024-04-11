@@ -1,8 +1,9 @@
 #!/bin/bash
+# NOTE: if you need to debug this file, use DRY_RUN=true to echo docker commands without running them
 
 set -exv
 
-IMAGE="quay.io/cloudservices/rhsm-subscriptions"
+source cicd_common.sh
 IMAGE_TAG=$(git rev-parse --short=7 HEAD)
 SMOKE_TEST_TAG="latest"
 
@@ -14,9 +15,18 @@ fi
 DOCKER_CONF="$PWD/.docker"
 mkdir -p "$DOCKER_CONF"
 docker --config="$DOCKER_CONF" login -u="$QUAY_USER" -p="$QUAY_TOKEN" quay.io
-docker --config="$DOCKER_CONF" build --no-cache -t "${IMAGE}:${IMAGE_TAG}" .
-docker --config="$DOCKER_CONF" push "${IMAGE}:${IMAGE_TAG}"
-docker --config="$DOCKER_CONF" tag "${IMAGE}:${IMAGE_TAG}" "${IMAGE}:${SMOKE_TEST_TAG}"
-docker --config="$DOCKER_CONF" push "${IMAGE}:${SMOKE_TEST_TAG}"
-docker --config="$DOCKER_CONF" tag "${IMAGE}:${IMAGE_TAG}" "${IMAGE}:qa"
-docker --config="$DOCKER_CONF" push "${IMAGE}:qa"
+
+# Initialize the GIT config which is required by the Gradle Nebula plugin to build the images
+git config user.name "$(git --no-pager log --format=format:'%an' -n 1)"
+git config user.email "$(git --no-pager log --format=format:'%ae' -n 1)"
+
+for service in $SERVICES; do
+  IMAGE="quay.io/cloudservices/$service"
+  DOCKERFILE=$(get_dockerfile $service)
+  docker --config="$DOCKER_CONF" build --ulimit nofile=2048:2048 -t "${IMAGE}:${IMAGE_TAG}" $PWD -f $PWD/$(get_dockerfile $service)
+  docker --config="$DOCKER_CONF" push "${IMAGE}:${IMAGE_TAG}"
+  docker --config="$DOCKER_CONF" tag "${IMAGE}:${IMAGE_TAG}" "${IMAGE}:${SMOKE_TEST_TAG}"
+  docker --config="$DOCKER_CONF" push "${IMAGE}:${SMOKE_TEST_TAG}"
+  docker --config="$DOCKER_CONF" tag "${IMAGE}:${IMAGE_TAG}" "${IMAGE}:qa"
+  docker --config="$DOCKER_CONF" push "${IMAGE}:qa"
+done

@@ -21,16 +21,13 @@
 package org.candlepin.subscriptions.security;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verifyZeroInteractions;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import org.candlepin.subscriptions.ApplicationProperties;
 import org.candlepin.subscriptions.rbac.RbacApi;
 import org.candlepin.subscriptions.rbac.RbacApiException;
 import org.candlepin.subscriptions.rbac.RbacProperties;
@@ -39,6 +36,7 @@ import org.candlepin.subscriptions.rbac.model.Access;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.security.core.Authentication;
@@ -55,18 +53,20 @@ class IdentityHeaderAuthenticationDetailsServiceTest {
 
   @Autowired private RbacService rbacService;
 
-  @Autowired IdentityHeaderAuthenticationDetailsService detailsService;
+  @Autowired
+  @Qualifier("identityHeaderAuthenticationDetailsService")
+  IdentityHeaderAuthenticationDetailsService detailsService;
 
   @Test
   void testAdminRoleGranted() throws Exception {
-    when(rbacApi.getCurrentUserAccess(eq("subscriptions")))
+    when(rbacApi.getCurrentUserAccess("subscriptions"))
         .thenReturn(Arrays.asList(new Access().permission("subscriptions:*:*")));
     assertThat(extractRoles(false), Matchers.contains(RoleProvider.SWATCH_ADMIN_ROLE));
   }
 
   @Test
   void testReportReaderRoleGranted() throws RbacApiException {
-    when(rbacApi.getCurrentUserAccess(eq("subscriptions")))
+    when(rbacApi.getCurrentUserAccess("subscriptions"))
         .thenReturn(List.of(new Access().permission("subscriptions:reports:read")));
     assertThat(extractRoles(false), Matchers.contains(RoleProvider.SWATCH_REPORT_READER));
   }
@@ -76,9 +76,9 @@ class IdentityHeaderAuthenticationDetailsServiceTest {
     Authentication auth = new PreAuthenticatedAuthenticationToken(new RhAssociatePrincipal(), null);
     UserDetails userDetails = detailsService.loadUserDetails(auth);
     assertEquals(
-        Collections.singleton(new SimpleGrantedAuthority("ROLE_RH_INTERNAL")),
+        Collections.singleton(new SimpleGrantedAuthority("ROLE_INTERNAL")),
         userDetails.getAuthorities());
-    verifyZeroInteractions(rbacApi);
+    verifyNoInteractions(rbacApi);
   }
 
   @Test
@@ -86,18 +86,20 @@ class IdentityHeaderAuthenticationDetailsServiceTest {
     Authentication auth = new PreAuthenticatedAuthenticationToken(new X509Principal(), null);
     UserDetails userDetails = detailsService.loadUserDetails(auth);
     assertEquals(
-        Collections.singleton(new SimpleGrantedAuthority("ROLE_RH_INTERNAL")),
+        Collections.singleton(new SimpleGrantedAuthority("ROLE_INTERNAL")),
         userDetails.getAuthorities());
-    verifyZeroInteractions(rbacApi);
+    verifyNoInteractions(rbacApi);
   }
 
   @Test
   void testDevModeGrantsAllRoles() {
-    assertThat(extractRoles(true), Matchers.contains(RoleProvider.SWATCH_ADMIN_ROLE));
+    assertThat(
+        extractRoles(true),
+        Matchers.containsInAnyOrder(RoleProvider.SWATCH_ADMIN_ROLE, RoleProvider.ROLE_INTERNAL));
   }
 
   private Collection<String> extractRoles(boolean devMode) {
-    ApplicationProperties props = new ApplicationProperties();
+    SecurityProperties props = new SecurityProperties();
     RbacProperties rbacProps = new RbacProperties();
     props.setDevMode(devMode);
     IdentityHeaderAuthenticationDetailsService source =

@@ -25,9 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.candlepin.subscriptions.db.TallySnapshotRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.candlepin.subscriptions.db.model.TallySnapshot;
-import org.candlepin.subscriptions.files.ProductProfileRegistry;
 import org.candlepin.subscriptions.tally.roller.BaseSnapshotRoller;
 import org.candlepin.subscriptions.tally.roller.DailySnapshotRoller;
 import org.candlepin.subscriptions.tally.roller.HourlySnapshotRoller;
@@ -35,18 +34,14 @@ import org.candlepin.subscriptions.tally.roller.MonthlySnapshotRoller;
 import org.candlepin.subscriptions.tally.roller.QuarterlySnapshotRoller;
 import org.candlepin.subscriptions.tally.roller.WeeklySnapshotRoller;
 import org.candlepin.subscriptions.tally.roller.YearlySnapshotRoller;
-import org.candlepin.subscriptions.util.ApplicationClock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Strategy for producing snapshots that captures the largest value recorded. */
+@Slf4j
 @Service
 public class MaxSeenSnapshotStrategy {
-
-  private static final Logger log = LoggerFactory.getLogger(MaxSeenSnapshotStrategy.class);
 
   private final HourlySnapshotRoller hourlyRoller;
   private final DailySnapshotRoller dailyRoller;
@@ -58,32 +53,35 @@ public class MaxSeenSnapshotStrategy {
 
   @Autowired
   public MaxSeenSnapshotStrategy(
-      TallySnapshotRepository tallyRepo,
-      ApplicationClock clock,
-      ProductProfileRegistry registry,
+      HourlySnapshotRoller hourlyRoller,
+      DailySnapshotRoller dailyRoller,
+      WeeklySnapshotRoller weeklyRoller,
+      MonthlySnapshotRoller monthlyRoller,
+      YearlySnapshotRoller yearlyRoller,
+      QuarterlySnapshotRoller quarterlyRoller,
       SnapshotSummaryProducer summaryProducer) {
     this.summaryProducer = summaryProducer;
-    hourlyRoller = new HourlySnapshotRoller(tallyRepo, clock, registry);
-    dailyRoller = new DailySnapshotRoller(tallyRepo, clock, registry);
-    weeklyRoller = new WeeklySnapshotRoller(tallyRepo, clock, registry);
-    monthlyRoller = new MonthlySnapshotRoller(tallyRepo, clock, registry);
-    yearlyRoller = new YearlySnapshotRoller(tallyRepo, clock, registry);
-    quarterlyRoller = new QuarterlySnapshotRoller(tallyRepo, clock, registry);
+    this.hourlyRoller = hourlyRoller;
+    this.dailyRoller = dailyRoller;
+    this.weeklyRoller = weeklyRoller;
+    this.monthlyRoller = monthlyRoller;
+    this.yearlyRoller = yearlyRoller;
+    this.quarterlyRoller = quarterlyRoller;
   }
 
   @Transactional
-  public Map<String, List<TallySnapshot>> produceSnapshotsFromCalculations(
-      Collection<String> accounts, Collection<AccountUsageCalculation> accountCalcs) {
+  public List<TallySnapshot> produceSnapshotsFromCalculations(AccountUsageCalculation accountCalc) {
     Stream<BaseSnapshotRoller> rollers =
         Stream.of(
             hourlyRoller, dailyRoller, weeklyRoller, monthlyRoller, quarterlyRoller, yearlyRoller);
+    var orgId = accountCalc.getOrgId();
     var newAndUpdatedSnapshots =
         rollers
-            .map(roller -> roller.rollSnapshots(accounts, accountCalcs))
+            .map(roller -> roller.rollSnapshots(accountCalc))
             .flatMap(Collection::stream)
-            .collect(Collectors.groupingBy(TallySnapshot::getAccountNumber));
-    summaryProducer.produceTallySummaryMessages(newAndUpdatedSnapshots);
-    log.info("Finished producing snapshots for all accounts.");
+            .collect(Collectors.toList());
+    summaryProducer.produceTallySummaryMessages(Map.of(orgId, newAndUpdatedSnapshots));
+    log.info("Finished producing snapshots for orgId={}", orgId);
     return newAndUpdatedSnapshots;
   }
 }

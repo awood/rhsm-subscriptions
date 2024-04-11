@@ -20,23 +20,22 @@
  */
 package org.candlepin.subscriptions.tally;
 
+import com.redhat.swatch.configuration.registry.MetricId;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import org.candlepin.subscriptions.db.model.HardwareMeasurementType;
-import org.candlepin.subscriptions.json.Measurement;
 
 /** The calculated usage for an account. */
 public class AccountUsageCalculation {
 
-  private String account;
-  private String owner;
+  private String orgId;
   private Map<UsageCalculation.Key, UsageCalculation> calculations;
   private Set<String> products;
 
-  public AccountUsageCalculation(String account) {
-    this.account = account;
+  public AccountUsageCalculation(String orgId) {
+    this.orgId = orgId;
     this.calculations = new HashMap<>();
     this.products = new HashSet<>();
   }
@@ -50,32 +49,27 @@ public class AccountUsageCalculation {
     return calc;
   }
 
-  public String getAccount() {
-    return account;
-  }
-
-  public String getOwner() {
-    return owner;
-  }
-
-  public void setOwner(String owner) {
-    this.owner = owner;
+  public String getOrgId() {
+    return orgId;
   }
 
   public void addCalculation(UsageCalculation calc) {
     String productId = calc.getProductId();
     this.calculations.put(
-        new UsageCalculation.Key(productId, calc.getSla(), calc.getUsage()), calc);
+        new UsageCalculation.Key(
+            productId,
+            calc.getSla(),
+            calc.getUsage(),
+            calc.getBillingProvider(),
+            calc.getBillingAccountId()),
+        calc);
     this.products.add(productId);
   }
 
   public void addUsage(
-      UsageCalculation.Key key,
-      HardwareMeasurementType category,
-      Measurement.Uom uom,
-      Double value) {
+      UsageCalculation.Key key, HardwareMeasurementType category, MetricId metricId, Double value) {
     UsageCalculation usageCalculation = getOrCreateCalculation(key);
-    usageCalculation.add(category, uom, value);
+    usageCalculation.add(category, metricId, value);
     products.add(key.getProductId());
   }
 
@@ -98,7 +92,7 @@ public class AccountUsageCalculation {
   @Override
   public String toString() {
     StringBuilder builder = new StringBuilder();
-    builder.append(String.format("[Account: %s, Owner: %s, Calculations: [", account, owner));
+    builder.append(String.format("[OrgId: %s, Calculations: [", orgId));
     for (UsageCalculation calc : this.calculations.values()) {
       builder.append(calc);
     }

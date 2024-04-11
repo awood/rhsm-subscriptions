@@ -1,0 +1,773 @@
+---
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: swatch-tally
+parameters:
+  - name: JAVA_DEBUG
+    # Set to "true" to enable remote debugging
+    value: ''
+  - name: JAVA_OPTS_APPEND
+    value: ''
+  - name: ENV_NAME
+    value: env-swatch-tally
+  - name: SERVER_MAX_HTTP_HEADER_SIZE
+    value: '48000'
+  - name: LOGGING_LEVEL_ROOT
+    value: WARN
+  - name: LOGGING_LEVEL
+    value: INFO
+  - name: KAFKA_MESSAGE_THREADS
+    value: '24'
+  - name: KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS
+    value: '3600000'
+  - name: KAFKA_SEEK_OVERRIDE_END
+    value: 'false'
+  - name: KAFKA_SEEK_OVERRIDE_TIMESTAMP
+    value: ''
+  - name: SERVICE_INSTANCE_INGRESS_KAFKA_SEEK_OVERRIDE_END
+    value: 'false'
+  - name: SERVICE_INSTANCE_INGRESS_KAFKA_SEEK_OVERRIDE_TIMESTAMP
+    value: ''
+  - name: SERVICE_INSTANCE_INGRESS_KAFKA_MAX_POLL_RECORDS
+    value: '500'
+  - name: REPLICAS
+    value: '1'
+  - name: IMAGE
+    value: quay.io/cloudservices/rhsm-subscriptions
+  - name: IMAGE_TAG
+    value: latest
+  - name: IMAGE_PULL_SECRET
+    value: quay-cloudservices-pull
+  - name: MEMORY_REQUEST
+    value: 1000Mi
+  - name: MEMORY_LIMIT
+    value: 1400Mi
+  - name: JOB_MEMORY_REQUEST
+    value: 1000Mi
+  - name: JOB_MEMORY_LIMIT
+    value: 1400Mi
+  - name: CPU_REQUEST
+    value: 350m
+  - name: CPU_LIMIT
+    value: 1500m
+  - name: PROM_URL
+    value: http://localhost:8082
+  - name: DATABASE_CONNECTION_TIMEOUT_MS
+    value: '30000'
+  # TODO This has been lowered from what it was in the previous environment (from 25 to 10)
+  # We were running the clowder DB out of connections.  If we need more, we need to investigate
+  # tuning the database to allow more
+  - name: DATABASE_MAX_POOL_SIZE
+    value: '10'
+  - name: INVENTORY_DATABASE_CONNECTION_TIMEOUT_MS
+    value: '30000'
+  # TODO This has been lowered from what it was in the previous environment (from 25 to 10)
+  # We were running the clowder DB out of connections.  If we need more, we need to investigate
+  # tuning the database to allow more
+  - name: INVENTORY_DATABASE_MAX_POOL_SIZE
+    value: '10'
+  - name: OPENSHIFT_BILLING_MODEL_FILTER
+    value: 'marketplace'
+  - name: USER_HOST
+    # required: true # FIXME Not sure where this is provided
+    value: 'user.stage.api.redhat.com'
+  - name: USER_MAX_CONNECTIONS
+    value: '100'
+  - name: USER_MAX_ATTEMPTS
+    value: '10'
+  - name: USER_BACK_OFF_MAX_INTERVAL
+    value: 64s
+  - name: USER_BACK_OFF_INITIAL_INTERVAL
+    value: 1s
+  - name: USER_BACK_OFF_MULTIPLIER
+    value: '2'
+  - name: TALLY_SUMMARY_PRODUCER_MAX_ATTEMPTS
+    value: '5'
+  - name: TALLY_SUMMARY_PRODUCER_BACK_OFF_MAX_INTERVAL
+    value: 1m
+  - name: TALLY_SUMMARY_PRODUCER_BACK_OFF_INITIAL_INTERVAL
+    value: 1s
+  - name: TALLY_SUMMARY_PRODUCER_BACK_OFF_MULTIPLIER
+    value: '2'
+  - name: HOST_LAST_SYNC_THRESHOLD
+    value: 30h
+  - name: PURGE_SNAPSHOT_SCHEDULE
+    value: 0 3 * * *
+  - name: PURGE_REMITTANCE_SCHEDULE
+    value: 0 3 * * *
+  - name: RETRY_REMITTANCE_SCHEDULE
+    value: '@hourly'
+  - name: CAPTURE_SNAPSHOT_SCHEDULE
+    value: 0 6 * * *
+  - name: CAPTURE_HOURLY_SNAPSHOT_SCHEDULE
+    value: '@hourly'
+  - name: PURGE_EVENTS_SCHEDULE
+    value: '30 4 * * *'
+  - name: EVENT_RECORD_RETENTION
+    value: 'P6M'
+  # TODO after enable individual functionality (see ENT-4487)
+  - name: DEV_MODE
+    value: 'false'
+  - name: ENABLE_ACCOUNT_RESET
+    value: 'false'
+  - name: ENABLE_SPLUNK_HEC
+    value: 'true'
+  - name: SPLUNK_SOURCE
+    value: 'rhsm-subscription-hec'
+  - name: SPLUNK_SOURCE_TYPE
+    value: 'springboot_server'
+  - name: SPLUNK_MESSAGE_FORMAT
+    value: 'text'
+  - name: SPLUNK_HEC_URL
+    value: https://splunk-hec.redhat.com:8088
+  - name: SPLUNK_HEC_CONNECT_TIMEOUT
+    value: '5000'
+  - name: SPLUNK_HEC_BATCH_SIZE
+    value: '1000'
+  - name: SPLUNK_HEC_TERMINATION_TIMEOUT
+    value: '2000'
+# nonprod secret keys have different syntax than prod/stage
+  - name: INVENTORY_SECRET_KEY_NAME
+    value: 'host-inventory-db'
+  - name: INVENTORY_SECRET_KEY_NAME_PREFIX
+    value: ''
+  - name: DEVTEST_EVENT_EDITING_ENABLED
+    value: 'false'
+
+  - name: EGRESS_IMAGE_TAG
+    value: fec6dc2
+  # Using a value of 'select 1' makes this job a no-op by default.
+  # When needed bump DB_CHANGELOG_CLEANUP_RUN_NUMBER, set DB_CHANGELOG_CLEANUP_SQL to 'delete from databasechangeloglock'
+  - name: DB_CHANGELOG_CLEANUP_RUN_NUMBER
+    value: '1'
+  - name: DB_CHANGELOG_CLEANUP_SQL
+    value: 'select 1'
+  - name: KAFKA_BILLABLE_USAGE_REPLICAS
+    value: '3'
+  - name: KAFKA_BILLABLE_USAGE_PARTITIONS
+    value: '3'
+  - name: KAFKA_SERVICE_INSTANCE_REPLICAS
+    value: '3'
+  - name: KAFKA_SERVICE_INSTANCE_PARTITIONS
+    value: '3'
+  - name: KAFKA_SERVICE_INSTANCE_DEAD_LETTER_REPLICAS
+    value: '3'
+  - name: KAFKA_SERVICE_INSTANCE_DEAD_LETTER_PARTITIONS
+    value: '3'
+  - name: KAFKA_TALLY_REPLICAS
+    value: '3'
+  - name: KAFKA_TALLY_PARTITIONS
+    value: '3'
+  - name: KAFKA_SUBSCRIPTIONS_TASKS_REPLICAS
+    value: '3'
+  - name: KAFKA_SUBSCRIPTIONS_TASKS_PARTITIONS
+    value: '3'
+  - name: KAFKA_ENABLED_ORGS_REPLICAS
+    value: '3'
+  - name: KAFKA_ENABLED_ORGS_PARTITIONS
+    value: '3'
+  - name: ENABLE_SYNCHRONOUS_OPERATIONS
+    value: 'false'
+  - name: TALLY_MAX_HBI_ACCOUNT_SIZE
+    value: '2147483647'  # Integer.MAX_VALUE by default
+  - name: HBI_RECONCILIATION_FLUSH_INTERVAL
+    value: '1024'
+  - name: USE_CPU_SYSTEM_FACTS_TO_ALL_PRODUCTS
+    value: 'true'
+  # Defines the number of Events to process in a batch during the hourly tally. Since a Host
+  # update can require many DB inserts (host,buckets,measurements,monthly totals), increasing
+  # the batch size too high has a direct negative impact hourly tally performance due to the
+  # increase of resulting DB insert/update statements.
+  #
+  # A default value of 16000 was chosen since it provided a good balance between memory usage and
+  # performance when executing an hourly tally requiring many batches.
+  - name: HOURLY_TALLY_EVENT_BATCH_SIZE
+    value: '16000'
+  - name: MACHINE_POOL
+    value: '' # don't restrict to a specific machine pool by default
+  - name: JOB_MACHINE_POOL
+    value: ''
+  - name: CONTRACT_CLIENT_BACK_OFF_INITIAL_INTERVAL_MILLIS
+    value: '1000'
+  - name: CONTRACT_CLIENT_BACK_OFF_MAX_INTERVAL_MILLIS
+    value: '64000'
+  - name: CONTRACT_CLIENT_BACK_OFF_MULTIPLIER
+    value: '2'
+  - name: CONTRACT_CLIENT_MAX_ATTEMPTS
+    value: '1'
+  - name: CURL_CRON_IMAGE
+    value: quay.io/app-sre/ubi8-ubi-minimal
+  - name: CURL_CRON_IMAGE_TAG
+    value: latest
+  - name: CURL_CRON_MEMORY_REQUEST
+    value: 500Mi
+  - name: CURL_CRON_MEMORY_LIMIT
+    value: 800Mi
+  - name: CURL_CRON_CPU_REQUEST
+    value: 350m
+  - name: CURL_CRON_CPU_LIMIT
+    value: 500m
+  - name: OTEL_SERVICE_NAME
+    value: swatch-tally
+  - name: OTEL_JAVAAGENT_ENABLED
+    value: 'false'
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: 'http://localhost:4317'
+  - description: database secret name
+    name: FLOORIST_DB_SECRET_NAME
+    value: swatch-tally-db
+  - description: bucket secret name
+    name: FLOORIST_BUCKET_SECRET_NAME
+    required: true
+    value: egress-s3
+  - name: FLOORIST_LOGLEVEL
+    description: Floorist loglevel config
+    value: 'INFO'
+  - name: FLOORIST_SUSPEND
+    description: Disable Floorist cronjob execution
+    required: true
+    value: 'false'
+
+
+objects:
+- apiVersion: cloud.redhat.com/v1alpha1
+  kind: ClowdApp
+  metadata:
+    name: swatch-tally
+    labels:
+      prometheus: rhsm
+  spec:
+    # The name of the ClowdEnvironment providing the services
+    envName: ${ENV_NAME}
+    dependencies:
+      - host-inventory
+      - swatch-contracts
+      - rbac
+      - export-service
+    # IQE plugin your ClowdApp is associated with
+    testing:
+      iqePlugin: rhsm-subscriptions
+
+    kafkaTopics:
+      - replicas: ${{KAFKA_TALLY_REPLICAS}}
+        partitions: ${{KAFKA_TALLY_PARTITIONS}}
+        topicName: platform.rhsm-subscriptions.tally
+      - replicas: ${{KAFKA_SUBSCRIPTIONS_TASKS_REPLICAS}}
+        partitions: ${{KAFKA_SUBSCRIPTIONS_TASKS_PARTITIONS}}
+        topicName: platform.rhsm-subscriptions.tasks
+      - replicas: ${{KAFKA_BILLABLE_USAGE_REPLICAS}}
+        partitions: ${{KAFKA_BILLABLE_USAGE_PARTITIONS}}
+        topicName: platform.rhsm-subscriptions.billable-usage
+      - replicas: ${{KAFKA_SERVICE_INSTANCE_REPLICAS}}
+        partitions: ${{KAFKA_SERVICE_INSTANCE_PARTITIONS}}
+        topicName: platform.rhsm-subscriptions.service-instance-ingress
+      - replicas: ${{KAFKA_SERVICE_INSTANCE_DEAD_LETTER_REPLICAS}}
+        partitions: ${{KAFKA_SERVICE_INSTANCE_DEAD_LETTER_PARTITIONS}}
+        topicName: platform.rhsm-subscriptions.service-instance-ingress.dlt
+      - replicas: ${{KAFKA_ENABLED_ORGS_REPLICAS}}
+        partitions: ${{KAFKA_ENABLED_ORGS_PARTITIONS}}
+        topicName: platform.rhsm-subscriptions.enabled-orgs-for-tasks
+
+    database:
+      # Must specify both a name and a major postgres version
+      name: swatch-tally-db
+      version: 12
+
+    pullSecrets:
+      name: ${IMAGE_PULL_SECRET}
+
+    deployments:
+      - name: service
+        replicas: ${{REPLICAS}}
+        webServices:
+          public:
+            enabled: true
+          metrics:
+            enabled: true
+        podSpec:
+          image: ${IMAGE}:${IMAGE_TAG}
+          initContainers:
+            - env:
+                - name: JAVA_DEBUG
+                  value: ${JAVA_DEBUG}
+                - name: SPRING_PROFILES_ACTIVE
+                  value: liquibase-only
+              inheritEnv: true
+              resources:
+                requests:
+                  cpu: ${CPU_REQUEST}
+                  memory: ${MEMORY_REQUEST}
+                limits:
+                  cpu: ${CPU_LIMIT}
+                  memory: ${MEMORY_LIMIT}
+          env:
+            - name: JAVA_DEBUG
+              value: ${JAVA_DEBUG}
+            - name: JAVA_OPTS_APPEND
+              value: -javaagent:/opt/splunk-otel-javaagent.jar ${JAVA_OPTS_APPEND}
+            - name: ENABLE_SPLUNK_HEC
+              value: ${ENABLE_SPLUNK_HEC}
+            - name: SPLUNKMETA_namespace
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: HOST_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: SPLUNK_HEC_URL
+              value: ${SPLUNK_HEC_URL}
+            - name: SPLUNK_HEC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: splunk-hec-external
+                  key: token
+            - name: SPLUNK_SOURCE
+              value: ${SPLUNK_SOURCE}
+            - name: SPLUNK_SOURCE_TYPE
+              value: ${SPLUNK_SOURCE_TYPE}
+            - name: SPLUNK_MESSAGE_FORMAT
+              value: ${SPLUNK_MESSAGE_FORMAT}
+            - name: SPLUNK_HEC_CONNECT_TIMEOUT
+              value: ${SPLUNK_HEC_CONNECT_TIMEOUT}
+            - name: SPLUNK_HEC_BATCH_SIZE
+              value: ${SPLUNK_HEC_BATCH_SIZE}
+            - name: SPLUNK_HEC_TERMINATION_TIMEOUT
+              value: ${SPLUNK_HEC_TERMINATION_TIMEOUT}
+            - name: SPRING_PROFILES_ACTIVE
+              value: worker,api,kafka-queue
+            - name: SERVER_MAX_HTTP_HEADER_SIZE
+              value: ${SERVER_MAX_HTTP_HEADER_SIZE}
+            - name: LOG_FILE
+              value: /logs/server.log
+            - name: JAVA_MAX_MEM_RATIO
+              value: '85'
+            - name: GC_MAX_METASPACE_SIZE
+              value: '256'
+            - name: LOGGING_LEVEL_ROOT
+              value: ${LOGGING_LEVEL_ROOT}
+            - name: LOGGING_LEVEL_ORG_CANDLEPIN
+              value: ${LOGGING_LEVEL}
+            - name: KAFKA_MESSAGE_THREADS
+              value: ${KAFKA_MESSAGE_THREADS}
+            - name: KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS
+              value: ${KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS}
+            - name: KAFKA_SEEK_OVERRIDE_END
+              value: ${KAFKA_SEEK_OVERRIDE_END}
+            - name: KAFKA_SEEK_OVERRIDE_TIMESTAMP
+              value: ${KAFKA_SEEK_OVERRIDE_TIMESTAMP}
+            - name: SERVICE_INSTANCE_INGRESS_KAFKA_SEEK_OVERRIDE_END
+              value: ${SERVICE_INSTANCE_INGRESS_KAFKA_SEEK_OVERRIDE_END}
+            - name: SERVICE_INSTANCE_INGRESS_KAFKA_SEEK_OVERRIDE_TIMESTAMP
+              value: ${SERVICE_INSTANCE_INGRESS_KAFKA_SEEK_OVERRIDE_TIMESTAMP}
+            - name: SERVICE_INSTANCE_INGRESS_KAFKA_MAX_POLL_RECORDS
+              value: ${SERVICE_INSTANCE_INGRESS_KAFKA_MAX_POLL_RECORDS}
+            - name: DATABASE_CONNECTION_TIMEOUT_MS
+              value: ${DATABASE_CONNECTION_TIMEOUT_MS}
+            - name: DATABASE_MAX_POOL_SIZE
+              value: ${DATABASE_MAX_POOL_SIZE}
+            - name: INVENTORY_DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: db.host
+            - name: INVENTORY_DATABASE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: ${INVENTORY_SECRET_KEY_NAME_PREFIX}name
+            - name: INVENTORY_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: db.user
+            - name: INVENTORY_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: ${INVENTORY_SECRET_KEY_NAME_PREFIX}password
+            - name: INVENTORY_DATABASE_CONNECTION_TIMEOUT_MS
+              value: ${INVENTORY_DATABASE_CONNECTION_TIMEOUT_MS}
+            - name: INVENTORY_DATABASE_MAX_POOL_SIZE
+              value: ${INVENTORY_DATABASE_MAX_POOL_SIZE}
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+            - name: PROM_URL
+              value: ${PROM_URL}
+            - name: OPENSHIFT_BILLING_MODEL_FILTER
+              value: ${OPENSHIFT_BILLING_MODEL_FILTER}
+            - name: USER_HOST
+              value: ${USER_HOST}
+            - name: USER_MAX_CONNECTIONS
+              value: ${USER_MAX_CONNECTIONS}
+            - name: USER_MAX_ATTEMPTS
+              value: ${USER_MAX_ATTEMPTS}
+            - name: USER_BACK_OFF_MAX_INTERVAL
+              value: ${USER_BACK_OFF_MAX_INTERVAL}
+            - name: USER_BACK_OFF_INITIAL_INTERVAL
+              value: ${USER_BACK_OFF_INITIAL_INTERVAL}
+            - name: USER_BACK_OFF_MULTIPLIER
+              value: ${USER_BACK_OFF_MULTIPLIER}
+            - name: RHSM_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tls
+                  key: keystore_password
+            - name: RHSM_KEYSTORE
+              value: /pinhead/keystore.jks
+            - name: DEV_MODE
+              value: ${DEV_MODE}
+            - name: ENABLE_ACCOUNT_RESET
+              value: ${ENABLE_ACCOUNT_RESET}
+            - name: DEVTEST_EVENT_EDITING_ENABLED
+              value: ${DEVTEST_EVENT_EDITING_ENABLED}
+            - name: ENABLE_SYNCHRONOUS_OPERATIONS
+              value: ${ENABLE_SYNCHRONOUS_OPERATIONS}
+            - name: TALLY_MAX_HBI_ACCOUNT_SIZE
+              value: ${TALLY_MAX_HBI_ACCOUNT_SIZE}
+            - name: HOURLY_TALLY_EVENT_BATCH_SIZE
+              value: ${HOURLY_TALLY_EVENT_BATCH_SIZE}
+            - name: HBI_RECONCILIATION_FLUSH_INTERVAL
+              value: ${HBI_RECONCILIATION_FLUSH_INTERVAL}
+            - name: USE_CPU_SYSTEM_FACTS_TO_ALL_PRODUCTS
+              value: ${USE_CPU_SYSTEM_FACTS_TO_ALL_PRODUCTS}
+            - name: HOST_LAST_SYNC_THRESHOLD
+              value: ${HOST_LAST_SYNC_THRESHOLD}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+            - name: OTEL_SERVICE_NAME
+              value: ${OTEL_SERVICE_NAME}
+            - name: OTEL_JAVAAGENT_ENABLED
+              value: ${OTEL_JAVAAGENT_ENABLED}
+            - name: EVENT_RECORD_RETENTION
+              value: ${EVENT_RECORD_RETENTION}
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /health/liveness
+              port: 9000
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /health
+              port: 9000
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: ${CPU_REQUEST}
+              memory: ${MEMORY_REQUEST}
+            limits:
+              cpu: ${CPU_LIMIT}
+              memory: ${MEMORY_LIMIT}
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+            - name: pinhead
+              mountPath: /pinhead
+          volumes:
+            - name: logs
+              emptyDir:
+            - name: pinhead
+              secret:
+                secretName: pinhead
+          machinePool: ${MACHINE_POOL}
+
+    jobs:
+      - name: tally
+        schedule: ${CAPTURE_SNAPSHOT_SCHEDULE}
+        activeDeadlineSeconds: 4200
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -H "Origin: https://swatch-tally-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X PUT "http://swatch-tally-service:8000/api/rhsm-subscriptions/v1/internal/rpc/tally/all-org-snapshots"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+            # This env property is necessary to pass the test check.
+            - name: SPRING_PROFILES_ACTIVE
+              value: capture-snapshots
+          resources:
+            requests:
+              cpu: ${CURL_CRON_CPU_REQUEST}
+              memory: ${CURL_CRON_MEMORY_REQUEST}
+            limits:
+              cpu: ${CURL_CRON_CPU_LIMIT}
+              memory: ${CURL_CRON_MEMORY_LIMIT}
+
+      - name: hourly
+        schedule: ${CAPTURE_HOURLY_SNAPSHOT_SCHEDULE}
+        activeDeadlineSeconds: 1800
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -H "Origin: https://swatch-tally-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X PUT "http://swatch-tally-service:8000/api/rhsm-subscriptions/v1/internal/rpc/tally/snapshots"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+            # This env property is necessary to pass the test check.
+            - name: SPRING_PROFILES_ACTIVE
+              value: capture-hourly-snapshots
+          resources:
+            requests:
+              cpu: ${CURL_CRON_CPU_REQUEST}
+              memory: ${CURL_CRON_MEMORY_REQUEST}
+            limits:
+              cpu: ${CURL_CRON_CPU_LIMIT}
+              memory: ${CURL_CRON_MEMORY_LIMIT}
+
+      - name: purge
+        schedule: ${PURGE_SNAPSHOT_SCHEDULE}
+        activeDeadlineSeconds: 1800
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -H "Origin: https://swatch-tally-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X POST "http://swatch-tally-service:8000/api/rhsm-subscriptions/v1/internal/rpc/tally/purge"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+        resources:
+          requests:
+            cpu: ${CURL_CRON_CPU_REQUEST}
+            memory: ${CURL_CRON_MEMORY_REQUEST}
+          limits:
+            cpu: ${CURL_CRON_CPU_LIMIT}
+            memory: ${CURL_CRON_MEMORY_LIMIT}
+
+      - name: purge-remittances
+        schedule: ${PURGE_REMITTANCE_SCHEDULE}
+        activeDeadlineSeconds: 1800
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -H "Origin: https://swatch-tally-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X POST "http://swatch-tally-service:8000/api/rhsm-subscriptions/v1/internal/rpc/tally/remittance/purge"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+        resources:
+          requests:
+            cpu: ${CURL_CRON_CPU_REQUEST}
+            memory: ${CURL_CRON_MEMORY_REQUEST}
+          limits:
+            cpu: ${CURL_CRON_CPU_LIMIT}
+            memory: ${CURL_CRON_MEMORY_LIMIT}
+
+      - name: purge-events
+        schedule: ${PURGE_EVENTS_SCHEDULE}
+        activeDeadlineSeconds: 1800
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -i -H "Origin: https://swatch-tally-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X DELETE "http://swatch-tally-service:8000/api/rhsm-subscriptions/v1/internal/rpc/tally/events/purge"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+        resources:
+          requests:
+            cpu: ${CURL_CRON_CPU_REQUEST}
+            memory: ${CURL_CRON_MEMORY_REQUEST}
+          limits:
+            cpu: ${CURL_CRON_CPU_LIMIT}
+            memory: ${CURL_CRON_MEMORY_LIMIT}
+
+      - name: retry-remittances
+        schedule: ${RETRY_REMITTANCE_SCHEDULE}
+        activeDeadlineSeconds: 1800
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -H "Origin: https://swatch-tally-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X POST "http://swatch-tally-service:8000/api/rhsm-subscriptions/v1/internal/rpc/remittance/processRetries"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+        resources:
+          requests:
+            cpu: ${CURL_CRON_CPU_REQUEST}
+            memory: ${CURL_CRON_MEMORY_REQUEST}
+          limits:
+            cpu: ${CURL_CRON_CPU_LIMIT}
+            memory: ${CURL_CRON_MEMORY_LIMIT}
+
+- apiVersion: cloud.redhat.com/v1alpha1
+  kind: ClowdApp
+  metadata:
+    name: swatch-db-changelog-cleanup
+  spec:
+    # The name of the ClowdEnvironment providing the services
+    envName: ${ENV_NAME}
+    kafkaTopics: []
+
+    pullSecrets:
+      name: ${IMAGE_PULL_SECRET}
+
+    deployments: []
+    jobs:
+      - name: db-changelog-cleanup-${DB_CHANGELOG_CLEANUP_RUN_NUMBER}
+        restartPolicy: Never
+        podSpec:
+          image: quay.io/cloudservices/rhsm-subscriptions-egress:${EGRESS_IMAGE_TAG}
+          name: db-changelog-cleanup
+          command: ["/bin/sh", "-c"]
+          args:
+          - psql -h $POSTGRESQL_SERVICE_HOST -U $POSTGRESQL_USER $POSTGRESQL_DATABASE -c "$DB_CHANGELOG_CLEANUP_SQL"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          env:
+          - name: POSTGRESQL_SERVICE_HOST
+            valueFrom:
+              secretKeyRef:
+                name: swatch-tally-db
+                key: db.host
+          - name: POSTGRESQL_USER
+            valueFrom:
+              secretKeyRef:
+                name: swatch-tally-db
+                key: db.user
+          - name: POSTGRESQL_DATABASE
+            valueFrom:
+              secretKeyRef:
+                name: swatch-tally-db
+                key: db.name
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: swatch-tally-db
+                key: db.password
+          - name: DB_CHANGELOG_CLEANUP_SQL
+            value: ${DB_CHANGELOG_CLEANUP_SQL}
+
+- apiVersion: cloud.redhat.com/v1alpha1
+  kind: ClowdJobInvocation
+  metadata:
+    name: db-changelog-cleanup-${DB_CHANGELOG_CLEANUP_RUN_NUMBER}
+  spec:
+    appName: swatch-db-changelog-cleanup
+    jobs:
+      - db-changelog-cleanup-${DB_CHANGELOG_CLEANUP_RUN_NUMBER}
+
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: swatch-psks
+  data:
+    self: cGxhY2Vob2xkZXI=
+
+- apiVersion: metrics.console.redhat.com/v1alpha1
+  kind: FloorPlan
+  metadata:
+    name: swatch-tally
+  spec:
+    database:
+      secretName: ${FLOORIST_DB_SECRET_NAME}
+    objectStore:
+      secretName: ${FLOORIST_BUCKET_SECRET_NAME}
+    logLevel: ${FLOORIST_LOGLEVEL}
+    suspend: ${{FLOORIST_SUSPEND}}
+    queries:
+    - prefix: swatch/tally
+      query: >-
+        select
+        org_id,
+        snapshot_date,
+        product_id,
+        measurement_type,
+        metric_id,
+        metric_id as uom,
+        value
+        from tally_snapshots s
+        join tally_measurements tm on s.id = tm.snapshot_id
+        where sla = '_ANY'
+        and usage = '_ANY'
+        and billing_provider = '_ANY'
+        and billing_account_id = '_ANY'
+        and granularity='DAILY'
+        and measurement_type!='TOTAL'
+        AND snapshot_date at time zone 'utc' = date_trunc('day', now() at time zone 'utc' - interval '2 day');
+    - prefix: swatch/subscriptions
+      query: >-
+        select distinct
+        subscription.org_id,
+        subscription.sku,
+        subscription.subscription_id,
+        subscription.start_date,
+        subscription.end_date,
+        subscription.quantity,
+        subscription_product_ids.product_id,
+        coalesce(metric_id_normalized.normalized, subscription_measurements.metric_id) as metric_id,
+        subscription_measurements.measurement_type,
+        subscription_measurements.value
+        from subscription
+        left join subscription_product_ids on subscription.subscription_id = subscription_product_ids.subscription_id
+        left join subscription_measurements on subscription.subscription_id = subscription_measurements.subscription_id
+        left join (values
+          ('SOCKETS', 'Sockets'),
+          ('CORES', 'Cores'),
+          ('INSTANCE_HOURS', 'Instance-hours')
+        ) as metric_id_normalized(value, normalized) on subscription_measurements.metric_id=metric_id_normalized.value

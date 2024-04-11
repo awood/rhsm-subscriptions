@@ -1,549 +1,417 @@
 import groovy.json.JsonOutput
+import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
+import org.openapitools.generator.gradle.plugin.tasks.ValidateTask
 
 buildscript {
-    repositories {
-        mavenLocal()
-        mavenCentral()
-    }
-    dependencies {
-        classpath "org.openapitools:openapi-generator-gradle-plugin:5.1.1"
-        classpath "org.jsonschema2pojo:jsonschema2pojo-gradle-plugin:1.1.1"
-        classpath "de.undercouch:gradle-download-task:4.1.1"
-    }
+    // dependabot will parse dependencies.gradle by detecting the `apply from` below
+    apply from: "dependencies.gradle"
 }
 
 plugins {
-    id "io.spring.dependency-management" version "1.0.11.RELEASE"
-    id "com.diffplug.spotless" version "5.14.0"
-    id "jacoco"
-    id "org.sonarqube" version "3.3"
-    id "org.springframework.boot" version "2.5.0"
-    id "net.researchgate.release" version "2.8.1"
-    id "GitProperties"
-    id 'com.adarshr.test-logger' version '3.0.0'
-    // Only applied for the rhsm-subscriptions-kafka sub project; applied below.
-    id "com.commercehub.gradle.plugin.avro-base" version "0.9.1" apply false
+    id "swatch.spring-boot-conventions"
+    id "org.sonarqube"
+    id "com.netflix.nebula.release"
+    id 'swatch.liquibase-conventions'
+    id 'jacoco-report-aggregation'
+    id 'jvm-test-suite'
 }
 
+configurations {
+    javaagent
+}
 
-ext {
-    swagger_annotations_version = "1.6.2"
-    swagger_ui_version = "3.50.0"
-    resteasy_version = "3.6.3.Final"
-    spring_boot_version = "2.5.0"
-    jboss_jaxrs_api_version = "2.0.1.Final"
-    resteasy_spring_boot_starter_version = "3.0.0.Final"
-    kafka_avro_serializer_version = "6.2.0"
-    avro_version = "1.10.2"
-    webjars_locator_version = "0.41"
-    generatedMetamodels = "build/generated/sources/annotationProcessor/java/main/org/candlepin/subscriptions"
+liquibase {
+    activities {
+        main {
+            changelogFile 'liquibase/changelog.xml'
+        }
+    }
 }
 
 allprojects {
-    apply plugin: "java"
-    apply plugin: "io.spring.dependency-management"
-
-    apply plugin: "com.diffplug.spotless"
-    spotless {
-        java {
-            targetExclude '**/build/**' // exclude generated code
-            enforceCheck false //allows build task to be successful, even if there is a code style violation
-            googleJavaFormat()
-            licenseHeaderFile "${rootDir}/config/codestyle/HEADER.txt" //lets you specify code that you don't want to violate rules or be reformatted
-            toggleOffOn()
-        }
-    }
-    // Define all versions here so that all projects will use the same versions.
-    dependencyManagement {
-        imports {
-            // See https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-dependencies to
-            // get listings of the contents of this BOM
-            mavenBom "org.springframework.boot:spring-boot-dependencies:$spring_boot_version"
-        }
-        dependencies{
-            dependency "org.jboss.spec.javax.ws.rs:jboss-jaxrs-api_2.1_spec:$jboss_jaxrs_api_version"
-            dependency "io.swagger:swagger-annotations:$swagger_annotations_version"
-            dependency "org.webjars:swagger-ui:$swagger_ui_version"
-            dependency "org.webjars:webjars-locator:$webjars_locator_version"
-            dependency "org.jboss.resteasy:resteasy-spring-boot-starter:$resteasy_spring_boot_starter_version"
-            dependencySet(group: "org.jboss.resteasy", version: "$resteasy_version") {
-                entry "resteasy-client"
-                entry "resteasy-multipart-provider"
-                entry "resteasy-validator-provider-11"
-            }
-            dependency "io.confluent:kafka-avro-serializer:$kafka_avro_serializer_version"
-            dependency "org.apache.avro:avro:$avro_version"
-            dependency "io.hawt:hawtio-springboot:2.13.4"
-        }
-    }
-
-    sourceCompatibility = "11"
-    targetCompatibility = "11"
-
-    tasks.withType(JavaCompile) {
-        options.compilerArgs << '-parameters'
-    }
-
-    repositories {
-        mavenCentral()
-        maven { url "http://packages.confluent.io/maven/" }
-    }
-
-    test {
-        useJUnitPlatform()
-    }
-
-    jacocoTestReport {
-        reports {
-            xml.enabled true
-        }
-    }
-
-    group = "org.candlepin"
-
-    dependencies {
-        implementation 'javax.annotation:javax.annotation-api:1.3.2'
-
-        compileOnly "org.projectlombok:lombok"
-        annotationProcessor "org.projectlombok:lombok"
-        testCompileOnly "org.projectlombok:lombok"
-        testAnnotationProcessor "org.projectlombok:lombok"
-        annotationProcessor('org.hibernate:hibernate-jpamodelgen')
-
-        testCompile "org.springframework.boot:spring-boot-starter-test"
-        testCompile "org.springframework:spring-test"
-
-        // We use JUnit 5 which the spring-boot-starter-test doesn't provide
-        testCompile "org.junit.jupiter:junit-jupiter-api"
-        testCompile "org.junit.jupiter:junit-jupiter-params"
-        testCompile "org.mockito:mockito-core"
-        testCompile "org.mockito:mockito-junit-jupiter"
-        testCompile "org.hamcrest:hamcrest"
-
-        testRuntime "org.junit.jupiter:junit-jupiter-engine"
-        testRuntime "ch.qos.logback:logback-classic"
-    }
-}
-
-apply plugin: 'jsonschema2pojo'
-jsonSchema2Pojo {
-    source = files("${projectDir}/schemas")
-    targetPackage = 'org.candlepin.subscriptions.json'
-    includeAdditionalProperties = false
-    includeJsr303Annotations = true
-    initializeCollections = false
-    dateTimeType = 'java.time.OffsetDateTime'
-    sourceType = 'yamlschema'
-    generateBuilders = true
-    includeGetters = true
-    includeSetters = true
-}
-
-// Disable the default jar; otherwise we end up with two different jars in the final image
-// See https://docs.spring.io/spring-boot/docs/2.5.0/gradle-plugin/reference/htmlsingle/#packaging-executable.and-plain-archives
-jar {
-    enabled = false
-}
-
-bootJar {
-    mainClassName = "org.candlepin.subscriptions.BootApplication"
-}
-
-springBoot {
-    buildInfo {
-        properties {
-            // Leave time empty: The default value is the instant at which the project is built. A
-            // side-effect is the task will never be up-to-date. As a result, builds will take longer.  See
-            // https://docs.spring.io/spring-boot/docs/2.1.4.RELEASE/gradle-plugin/reference/html/#integrating-with-actuator
-            time = null
-            additional = [
-                    'gitDescription': "${project.git.description ?: ''}",
-                    'gitHash': "${project.git.hash ?: ''}",
-            ]
-        }
-    }
-}
-
-release {
-    // Use single quotes so the variables aren't interpreted in the build file itself!
-    tagTemplate = '${name}-${version}'
-    preTagCommitMessage = '[Subscriptions Release] - pre tag commit: '
-    tagCommitMessage = '[Subscriptions Release] - creating tag: '
-    newVersionCommitMessage = '[Subscriptions Release] - version bump: '
-    pushReleaseVersionBranch = 'main'
-    git {
-        requireBranch = /develop|hotfix.*/
-        pushToRemote = false
-    }
+    group 'com.redhat.swatch'
 }
 
 dependencies {
-    // Generates configuration metadata that IntelliJ can use
-    annotationProcessor('org.hibernate:hibernate-jpamodelgen')
-    annotationProcessor "org.springframework.boot:spring-boot-configuration-processor"
-    // For the LiveReload feature of spring boot as long as IntelliJ is set to build/make automatically on
-    // code changes
-    compile('org.springframework.boot:spring-boot-devtools')
+    implementation project(":swatch-common-clock")
+    implementation project(':swatch-core')
+    implementation project(":api")
+    implementation project(":clients:rh-marketplace-client")
+    implementation project(":clients:product-client")
+    implementation project(":clients:prometheus-client")
+    implementation project(":clients:rbac-client")
+    implementation project(":clients:rhsm-client")
+    implementation project(":clients:subscription-client")
+    implementation project(":clients:contracts-client")
+    implementation project(":clients:swatch-internal-subscription-springboot-client")
+    implementation project(":clients:export-client")
 
-    compile project(":api")
-    compile project(":insights-inventory-client")
-    compile project(":rhsm-client")
-    compile project(":cloudigrade-client")
-    compile project(":rbac-client")
-    compile project(":subscription-client")
-    compile project(":marketplace-client")
-    compile project(":prometheus-client")
-    compile project(":user-client")
-    compile project(":product-client")
-    compile project(":kafka-schema")
-
-    // This starter pulls in Spring Boot versions that we don't want.  The actual classes that we need are
-    // baked into the starter artifact itself which is peculiar but sometimes that's how the cookie crumbles.
-    compile("org.jboss.resteasy:resteasy-spring-boot-starter") {
-        exclude group: "org.springframework.boot"
-    }
-    compile("io.confluent:kafka-avro-serializer") {
-        exclude group: "org.apache.kafka"
-        // A transitive dependency, org.apache.zookeeper:zookeeper, includes log4j as well as slf4j.  We use
-        // logback and SLF4J issues a warning if more than one logging implementation is on the classpath.
-        // Frowny face to Zookeeper for adding a logging implementation to a library jar.
-        exclude group: "org.slf4j", module: "slf4j-log4j12"
-    }
-
-    compile "org.springframework.boot:spring-boot-starter-actuator"
-    compile "org.springframework.boot:spring-boot-starter-aop"
-    compile "org.springframework.boot:spring-boot-starter-data-jpa"
-    compile "org.springframework.boot:spring-boot-starter-security"
-    compile "org.springframework.boot:spring-boot-starter-web"
-    compile "org.springframework.retry:spring-retry"
-    compile "org.springframework:spring-context-support"
-    compile "org.springframework.kafka:spring-kafka"
+    implementation "org.springframework.boot:spring-boot-starter-data-jpa"
+    implementation "org.springframework.kafka:spring-kafka"
     // the following dep is necessary to avoid jackson kotlin warnings
-    compile "com.fasterxml.jackson.module:jackson-module-kotlin"
+    implementation "com.fasterxml.jackson.module:jackson-module-kotlin"
+    // used to deserialize subscription/product messages from UMB
+    implementation "com.fasterxml.jackson.dataformat:jackson-dataformat-xml"
+    implementation "com.fasterxml.jackson.module:jackson-module-jakarta-xmlbind-annotations"
+    // used to connect to umb
+    implementation "org.springframework.boot:spring-boot-starter-activemq"
+    // used to parse events generated by console.redhat.com (Export Service)
+    implementation libraries["event-schemas"]
+    implementation "org.liquibase:liquibase-core"
+    implementation "org.postgresql:postgresql"
+    implementation libraries["guava"]
 
-    compile "io.micrometer:micrometer-registry-prometheus"
-    compile "org.liquibase:liquibase-core"
-    compile "org.webjars:swagger-ui"
-    compile "org.webjars:webjars-locator"
-    compile "org.yaml:snakeyaml"
-    compile "org.postgresql:postgresql"
-    compile "io.hawt:hawtio-springboot"
-    compile "org.hibernate.validator:hibernate-validator"
+    implementation libraries["mapstruct"]
+    annotationProcessor libraries["mapstruct-processor"]
+    testAnnotationProcessor libraries["mapstruct-processor"]
 
-    testCompile "org.springframework.security:spring-security-test"
-    testCompile "org.springframework.kafka:spring-kafka-test"
+    testImplementation "org.springframework.security:spring-security-test"
+    testImplementation "org.springframework.kafka:spring-kafka-test"
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation libraries["wiremock"]
+    testImplementation libraries["awaitility"]
+    testImplementation project(':swatch-core-test')
+    testImplementation project(':swatch-common-testcontainers')
+    testImplementation "org.hsqldb:hsqldb"
 
-    runtime("org.jboss.resteasy:resteasy-validator-provider-11") {
-        exclude group: 'org.hibernate' // exclude older hibernate validator
+    javaagent  libraries["splunk-otel-agent"]
+
+    subprojects.findAll { !Set.of(
+            project(':clients'),
+            project(':clients:quarkus'),
+            project(':swatch-common-platform-quarkus'),
+            project(':swatch-common-platform-spring-boot'),
+    ).contains(it)}.each {
+        jacocoAggregation it
     }
-
-    runtime "org.hsqldb:hsqldb"
-    runtime "org.jolokia:jolokia-core"
 }
 
-// Add a custom task to output dependency info in a machine parseable format. Used to generate dependency
-// reports for Product Security.
-// adapted from https://stackoverflow.com/a/34641632
-// easiest to use via `./gradlew -q dependencyJson`
-tasks.register('dependencyJson') {
-    println JsonOutput.toJson(project.configurations.runtime.incoming.resolutionResult.allDependencies.collect { dependency ->
-        ModuleVersionIdentifier artifact = dependency.selected.moduleVersion
-        ComponentIdentifier dependent = dependency.from.id
-        [
-            group: artifact.group,
-            name: artifact.name,
-            version: artifact.version,
-            dependent: dependent.displayName, // by collecting dependents, we can determine transitivity.
-            displayName: dependency.requested.displayName, // displayName starts with "project " for subprojects
-        ]
-    }.groupBy {
-        [
-            group: it.group,
-            name: it.name,
-            version: it.version,
-        ]
-    }.collect { artifactId, artifactInstances ->
-        artifactId + [
-            displayNames: artifactInstances.collect { it.displayName }.unique().sort(),
-            dependents: artifactInstances.collect { it.dependent },
-        ]
-    }.sort { "${it.group}:${it.name}:${it.version}" })
+allprojects {
+    // Add a custom task to output dependency info in a machine parseable format. Used to generate dependency
+    // reports for Product Security.
+    // adapted from https://stackoverflow.com/a/34641632
+    // easiest to use via `./gradlew -q dependencyJson`
+    tasks.register('dependencyJson') {
+        doLast {
+            def collectDeps = { ResolvedDependency dependency ->
+                def collectedDeps = []
+                // depth first traversal
+                def dependencyStack = [dependency]
+                while (!dependencyStack.isEmpty()) {
+                    ResolvedDependency current = dependencyStack.pop()
+                    collectedDeps.add(current)
+                    current.children.forEach { dependencyStack.push(it) }
+                }
+                return collectedDeps
+            }
+            Set allDeps = []
+            def projects = allprojects
+                    .grep { project -> !project.name.endsWith("-test") }
+                    .grep { project -> 'default' in project.configurations.names }
+            for (Project project : projects) {
+                // see https://docs.gradle.org/current/userguide/java_plugin.html#sec:java_plugin_and_dependency_management
+                // "default" is all artifacts required at runtime
+                for (ResolvedDependency topLevelDependency : project.configurations.default.resolvedConfiguration.firstLevelModuleDependencies) {
+                    def collectedDeps = collectDeps(topLevelDependency)
+                    for (ResolvedDependency dependency : collectedDeps) {
+                        // skip deps that appear to be from this project
+                        if (dependency.moduleGroup != project.group || dependency.moduleVersion != project.version) {
+                            allDeps.add([
+                                    group  : dependency.moduleGroup,
+                                    name   : dependency.moduleName,
+                                    version: dependency.moduleVersion,
+                            ])
+                        }
+                    }
+
+                }
+            }
+            println JsonOutput.toJson(allDeps.sort { "${it.group}:${it.name}:${it.version}" })
+        }
+    }
 }
 
-sourceSets {
-    main.java.srcDir generatedMetamodels
+/* TODO - The directives below to generate the API classes are duplicates of the
+ * the directives we use for the api module.  We need to DRY this up but that is
+ * going to require a little Gradle-fu that I don't currently possess.
+ */
+ext {
+    internal_spec_dir = "${projectDir}/src/main/spec"
+
+    tally_api_spec_file = "${internal_spec_dir}/internal-tally-api-spec.yaml"
+    tally_config_file = "${internal_spec_dir}/internal-tally-api-config.json"
+
+    sub_sync_api_spec_file = "${internal_spec_dir}/internal-subscriptions-sync-api-spec.yaml"
+    sub_sync_config_file = "${internal_spec_dir}/internal-subscriptions-sync-api-config.json"
+
+    billing_api_spec_file = "${internal_spec_dir}/internal-billing-api-spec.yaml"
+    billing_config_file = "${internal_spec_dir}/internal-billing-api-config.json"
+
+    swatch_producer_rhm_api_spec_file = "${internal_spec_dir}/internal-swatch-producer-red-hat-marketplace-api-spec.yaml"
+    swatch_producer_rhm_config_spec_file = "${internal_spec_dir}/internal-swatch-producer-red-hat-marketplace-api-config.json"
+
+}
+
+tasks.register("buildApiTally", GenerateTask) {
+    generatorName = "jaxrs-spec"
+    inputSpec = tally_api_spec_file
+    configFile = tally_config_file
+    outputDir = "$buildDir/generated/tally"
+    configOptions = [
+        interfaceOnly: "true",
+        generatePom: "false",
+        dateLibrary: "java8",
+        useJakartaEe: "true",
+    ]
+}
+
+tasks.register("buildApiSubSync", GenerateTask) {
+    generatorName = "jaxrs-spec"
+    inputSpec = sub_sync_api_spec_file
+    configFile = sub_sync_config_file
+    outputDir = "$buildDir/generated/sub-sync"
+    configOptions = [
+            interfaceOnly: "true",
+            generatePom: "false",
+            dateLibrary: "java8",
+            useJakartaEe: "true",
+    ]
+}
+
+tasks.register("buildApiBilling", GenerateTask) {
+    generatorName = "jaxrs-spec"
+    inputSpec = billing_api_spec_file
+    configFile = billing_config_file
+    outputDir = "$buildDir/generated/billing"
+    configOptions = [
+            interfaceOnly: "true",
+            generatePom: "false",
+            dateLibrary: "java8",
+            useJakartaEe: "true",
+    ]
+}
+
+tasks.register("buildApiProducerRHM", GenerateTask) {
+    generatorName = "jaxrs-spec"
+    inputSpec = swatch_producer_rhm_api_spec_file
+    configFile = swatch_producer_rhm_config_spec_file
+    outputDir = "$buildDir/generated/rhm"
+    configOptions = [
+            interfaceOnly: "true",
+            generatePom: "false",
+            dateLibrary: "java8",
+            useJakartaEe: "true",
+    ]
+}
+
+tasks.register("openApiGenerate") {
+    dependsOn(provider {
+        tasks.findAll { task -> task.name.startsWith('buildApi') }
+    })
+}
+
+tasks.register("validateApiTally", ValidateTask) {
+    inputSpec = tally_api_spec_file
+}
+
+tasks.register("validateApiSubSync", ValidateTask) {
+    inputSpec = sub_sync_api_spec_file
+}
+
+tasks.register("validateApiBilling", ValidateTask) {
+    inputSpec = billing_api_spec_file
+}
+
+tasks.register("apiValidate") {
+    dependsOn(provider {
+        tasks.findAll { task -> task.name.startsWith('validateApi') }
+    })
+}
+
+tasks.register("generateApiDocsTally", GenerateTask) {
+    generatorName = "html"
+    inputSpec = tally_api_spec_file
+    outputDir = "$buildDir/internal-tally-docs"
+    generateModelTests = false
+    generateApiTests = false
+}
+
+tasks.register("generateApiDocsSubSync", GenerateTask) {
+    generatorName = "html"
+    inputSpec = sub_sync_api_spec_file
+    outputDir = "$buildDir/internal-subscription-sync-docs"
+    generateModelTests = false
+    generateApiTests = false
+}
+
+tasks.register("generateApiDocsBilling", GenerateTask) {
+    generatorName = "html"
+    inputSpec = billing_api_spec_file
+    outputDir = "$buildDir/internal-billing-docs"
+    generateModelTests = false
+    generateApiTests = false
+}
+
+tasks.register("generateOpenApiJsonTally", GenerateTask) {
+    generatorName = "openapi"
+    inputSpec = tally_api_spec_file
+    outputDir = "$buildDir/openapijson"
+    generateModelTests = false
+    generateApiTests = false
+    configOptions = [
+        outputFileName: "internal-tally-openapi.json",
+        useJakartaEe: "true",
+    ]
+}
+
+tasks.register("generateOpenApiJsonSubSync", GenerateTask) {
+    generatorName = "openapi"
+    inputSpec = sub_sync_api_spec_file
+    outputDir = "$buildDir/openapijson"
+    generateModelTests = false
+    generateApiTests = false
+    configOptions = [
+        outputFileName: "internal-subscription-sync-openapi.json",
+        useJakartaEe: "true",
+    ]
+}
+
+tasks.register("generateOpenApiJsonBilling", GenerateTask) {
+    generatorName = "openapi"
+    inputSpec = billing_api_spec_file
+    outputDir = "$buildDir/openapijson"
+    generateModelTests = false
+    generateApiTests = false
+    configOptions = [
+            outputFileName: "internal-billing-openapi.json",
+            useJakartaEe: "true",
+    ]
+}
+
+tasks.register("generateOpenApiJsonProducerRhM", GenerateTask) {
+    generatorName = "openapi"
+    inputSpec = swatch_producer_rhm_api_spec_file
+    outputDir = "$buildDir/openapijson"
+    generateModelTests = false
+    generateApiTests = false
+    configOptions = [
+            outputFileName: "internal-swatch-producer-red-hat-marketplace-openapi.json",
+            useJakartaEe: "true",
+    ]
+}
+
+processResources {
+    from tasks.generateOpenApiJsonTally, tasks.generateOpenApiJsonSubSync, tasks.generateOpenApiJsonBilling, tasks.generateOpenApiJsonProducerRhM
+    from tally_api_spec_file, sub_sync_api_spec_file, billing_api_spec_file, swatch_producer_rhm_api_spec_file
+}
+
+sourceSets.main.java.srcDirs += [
+    "${buildDir}/generated/tally/src/gen/java",
+    "${buildDir}/generated/sub-sync/src/gen/java",
+    "${buildDir}/generated/billing/src/gen/java",
+    "${buildDir}/generated/metering/src/gen/java",
+    "${buildDir}/generated/rhm/src/gen/java"
+]
+
+tasks.register("downloadJavaAgent", Copy) {
+    into "$buildDir/javaagent"
+    from {
+        configurations.javaagent
+    }
+    rename { filename ->
+        'splunk-otel-javaagent.jar'
+    }
 }
 
 compileJava {
-    options.annotationProcessorGeneratedSourcesDirectory = file(generatedMetamodels)
+    dependsOn processResources
+    dependsOn(provider {
+        tasks.findAll { task -> task.name.startsWith('buildApi') }
+    })
 }
 
-compileJava.dependsOn(processResources)
-project.tasks["sonarqube"].dependsOn "test"
-project.tasks["sonarqube"].dependsOn "jacocoTestReport"
+assemble.dependsOn(tasks.downloadJavaAgent)
 
 project(":api") {
+    apply plugin: "swatch.java-conventions"
+    apply plugin: "swatch.spring-boot-dependencies-conventions"
     apply plugin: "org.openapi.generator"
 
     ext {
-        api_spec_path = "${projectDir}/rhsm-subscriptions-api-spec.yaml"
+        api_spec_file = "${projectDir}/rhsm-subscriptions-api-spec.yaml"
         config_file = "${projectDir}/rhsm-subscriptions-api-config.json"
     }
 
     openApiGenerate {
-      generatorName = "jaxrs-spec"
-      inputSpec = api_spec_path
-      configFile = config_file
-      outputDir = "$buildDir/generated"
-      configOptions = [
-          interfaceOnly: "true",
-          generatePom: "false",
-          dateLibrary: "java8",
-      ]
-    }
-
-    openApiValidate {
-        inputSpec = api_spec_path
-    }
-
-    task generateApiDocs(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
-        generatorName = "html"
-        inputSpec = api_spec_path
-        outputDir = "$buildDir/docs"
-        generateApiDocumentation = true
-        generateModelDocumentation = true
-        generateModelTests = false
-        generateApiTests = false
-        withXml = false
-    }
-
-    task generateOpenApiJson(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
-        generatorName = "openapi"
-        inputSpec = api_spec_path
-        outputDir = "$buildDir/generated/openapijson"
-        generateApiDocumentation = true
-        generateModelDocumentation = true
-        generateModelTests = false
-        generateApiTests = false
-        withXml = false
-    }
-
-    processResources {
-        from "$buildDir/generated/openapijson/openapi.json"
-        from api_spec_path
-        rename { String fileName ->
-            api_spec_path.endsWith(fileName) ? 'openapi.yaml' : fileName  // rename yaml to openapi.yaml
-        }
-    }
-
-    dependencies {
-        compile "com.fasterxml.jackson.core:jackson-annotations"
-        compile "javax.validation:validation-api"
-        compile "org.jboss.spec.javax.ws.rs:jboss-jaxrs-api_2.1_spec"
-        compile "io.swagger:swagger-annotations"
-        compile "com.google.code.findbugs:jsr305:3.0.2"
-        compile "org.openapitools:jackson-databind-nullable:0.2.1"
-    }
-
-    sourceSets.main.java.srcDirs = ["${buildDir}/generated/src/gen/java"]
-    compileJava.dependsOn tasks.openApiGenerate
-    processResources.dependsOn tasks.generateOpenApiJson
-}
-
-project(":insights-inventory-client") {
-    apply plugin: "org.openapi.generator"
-    apply plugin: "de.undercouch.download"
-
-    ext {
-        api_spec_path = "${buildDir}/api.spec.yaml"
-        config_file = "${projectDir}/insights-inventory-client-config.json"
-    }
-
-    // work around https://github.com/OpenAPITools/openapi-generator/issues/8255 by downloading the spec manually
-    task downloadSpec(type: Download) {
-        src 'https://raw.githubusercontent.com/RedHatInsights/insights-host-inventory/075f8e4433ecfb2e227e02108096847242e14e19/swagger/api.spec.yaml'
-        dest buildDir
-        overwrite false
-    }
-
-    task downloadSystemProfileSpec(type: Download) {
-        src 'https://raw.githubusercontent.com/RedHatInsights/insights-host-inventory/d479778d9ae72fea9a493429ea44142364648ec5/swagger/system_profile.spec.yaml'
-        dest buildDir
-        overwrite false
-    }
-
-    tasks.openApiGenerate.dependsOn downloadSpec
-    tasks.openApiGenerate.dependsOn downloadSystemProfileSpec
-
-    dependencies {
-        compileOnly 'org.springframework.boot:spring-boot'
-    }
-}
-
-project(":rhsm-client") {
-    apply plugin: "org.openapi.generator"
-
-    ext {
-        api_spec_path = "${projectDir}/rhsm-client-spec.yaml"
-        config_file = "${projectDir}/rhsm-client-config.json"
-    }
-
-    dependencies {
-        testCompile "com.github.tomakehurst:wiremock-jre8:2.28.1"
-    }
-}
-
-project(":rbac-client") {
-    apply plugin: "org.openapi.generator"
-    apply plugin: "de.undercouch.download"
-
-    ext {
-        api_spec_path = "${buildDir}/openapi.json"
-        config_file = "${projectDir}/rbac-client-config.json"
-    }
-
-    // work around https://github.com/OpenAPITools/openapi-generator/issues/8255 by downloading the spec manually
-    task downloadSpec(type: Download) {
-        src 'https://raw.githubusercontent.com/RedHatInsights/insights-rbac/stable/docs/source/specs/openapi.json'
-        dest buildDir
-        overwrite false
-    }
-
-    tasks.openApiGenerate.dependsOn downloadSpec
-
-    dependencies {
-        compileOnly "org.springframework:spring-web"
-        compileOnly "javax.servlet:javax.servlet-api"
-    }
-}
-
-project(":cloudigrade-client") {
-    apply plugin: "org.openapi.generator"
-
-    ext {
-        api_spec_path = "${projectDir}/cloudigrade-api-spec.yaml"
-        config_file = "${projectDir}/cloudigrade-client-config.json"
-    }
-}
-
-project(":subscription-client") {
-    apply plugin: "org.openapi.generator"
-
-    ext {
-        api_spec_path = "${projectDir}/subscription-api-spec.yaml"
-        config_file = "${projectDir}/subscription-client-config.json"
-    }
-}
-
-project(":marketplace-client") {
-    apply plugin: "org.openapi.generator"
-
-    ext {
-        api_spec_path = "${projectDir}/marketplace-api-spec.yaml"
-        config_file = "${projectDir}/marketplace-client-config.json"
-    }
-
-    dependencies {
-        compileOnly "org.springframework:spring-web"
-        compileOnly "javax.servlet:javax.servlet-api"
-    }
-}
-
-project(":prometheus-client") {
-    apply plugin: "org.openapi.generator"
-
-    ext {
-        api_spec_path = "${projectDir}/prometheus-query-api-spec.yaml"
-        config_file = "${projectDir}/prometheus-client-config.json"
-    }
-}
-
-project(":user-client") {
-    apply plugin: "org.openapi.generator"
-
-    ext {
-        api_spec_path = "${projectDir}/user-api-spec.yaml"
-        config_file = "${projectDir}/user-client-config.json"
-    }
-}
-
-project(":product-client") {
-    apply plugin: "org.openapi.generator"
-
-    ext {
-        api_spec_path = "${projectDir}/product-api-spec.yaml"
-        config_file = "${projectDir}/product-client-config.json"
-    }
-}
-
-configure(subprojects.findAll { it.name in ["cloudigrade-client", 'rbac-client', 'rhsm-client',
-                                            'insights-inventory-client', 'subscription-client',
-                                            'marketplace-client', 'prometheus-client', 'user-client',
-                                            'product-client']}) {
-    apply plugin: "org.openapi.generator"
-
-    openApiValidate {
-        inputSpec = api_spec_path
-    }
-
-    task generateApiDocs(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
-        generatorName = "html"
-        inputSpec = api_spec_path
-        outputDir = "$buildDir/docs"
-        generateApiDocumentation = true
-        generateModelDocumentation = true
-        generateModelTests = false
-        generateApiTests = false
-        withXml = false
-    }
-
-    openApiGenerate {
-        inputSpec = api_spec_path
+        generatorName = "jaxrs-spec"
+        inputSpec = api_spec_file
         configFile = config_file
-        outputDir = "${buildDir}/generated"
-        generatorName = "java"
+        outputDir = "$buildDir/generated"
         configOptions = [
-                generatePom: "false",
-                library: "resteasy",
-                java8: "true",
-                dateLibrary: "java8"
+            interfaceOnly: "true",
+            generatePom: "false",
+            dateLibrary: "java8",
+            useJakartaEe: "true",
+        ]
+        importMappings = [
+            "MetricId": "com.redhat.swatch.configuration.registry.MetricId",
+            "ProductId": "com.redhat.swatch.configuration.registry.ProductId",
+        ]
+        typeMappings = [
+            "string+MetricId": "MetricId",
+            "string+ProductId": "ProductId",
         ]
     }
 
-    dependencies {
-        compile "org.jboss.resteasy:resteasy-client"
-        compile "org.jboss.resteasy:resteasy-multipart-provider"
-
-        compile "com.fasterxml.jackson.core:jackson-annotations"
-        compile "com.fasterxml.jackson.core:jackson-databind"
-        compile "com.fasterxml.jackson.datatype:jackson-datatype-jsr310"
-
-        compile "org.springframework:spring-context"
-        compile "org.slf4j:slf4j-api"
-        compile "io.swagger:swagger-annotations"
-        compile "com.google.code.findbugs:jsr305:3.0.2"
-        compile "org.openapitools:jackson-databind-nullable:0.2.1"
+    tasks.register("validateApiSpec", ValidateTask) {
+        inputSpec = api_spec_file
     }
 
-    sourceSets.main.java.srcDirs += "${buildDir}/generated/src/main/java"
+    tasks.register("generateApiDocs", GenerateTask) {
+        generatorName = "html"
+        inputSpec = api_spec_file
+        outputDir = "$buildDir/docs"
+        generateModelTests = false
+        generateApiTests = false
+    }
 
+    tasks.register("generateOpenApiJson", GenerateTask) {
+        generatorName = "openapi"
+        inputSpec = api_spec_file
+        outputDir = "$buildDir/openapijson"
+        generateModelTests = false
+        generateApiTests = false
+    }
+
+    processResources {
+        from tasks.generateOpenApiJson
+        from api_spec_file
+    }
+
+    dependencies {
+        implementation project(":swatch-product-configuration")
+        implementation "jakarta.annotation:jakarta.annotation-api"
+        implementation libraries["jackson-annotations"]
+        implementation libraries["jakarta-validation-api"]
+        implementation libraries["jakarta-ws-rs"]
+        implementation libraries["swagger-annotations"]
+        implementation libraries["jsr305"]
+        implementation libraries["jackson-databind-nullable"]
+    }
+
+    sourceSets.main.java.srcDirs += ["${buildDir}/generated/src/gen/java"]
     compileJava.dependsOn tasks.openApiGenerate
 }
 
-project(":kafka-schema") {
-    apply plugin: "com.commercehub.gradle.plugin.avro-base"
+tasks.check.dependsOn tasks.testCodeCoverageReport
 
-    dependencies {
-        compile "org.apache.avro:avro"
+sonarqube {
+    properties {
+        property "sonar.coverage.jacoco.xmlReportPaths", "${rootProject.projectDir}/build/reports/jacoco/testCodeCoverageReport/testCodeCoverageReport.xml"
     }
+}
 
-    task generateAvro(type: com.commercehub.gradle.plugin.avro.GenerateAvroJavaTask) {
-        // sub dir needed so that the plugin does not traverse into the build dir (if it exists).
-        source("${projectDir}/avro")
-        outputDir = file("${buildDir}/generated/avro/src/main/java")
-    }
-
-    sourceSets.main.java.srcDirs += "${buildDir}/generated/avro/src/main/java"
-    compileJava.source(generateAvro.outputs)
-    compileJava.dependsOn tasks.generateAvro
+bootRun {
+    systemProperties = System.properties
 }

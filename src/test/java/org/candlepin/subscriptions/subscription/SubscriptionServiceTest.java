@@ -20,9 +20,7 @@
  */
 package org.candlepin.subscriptions.subscription;
 
-import static org.mockito.Mockito.only;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.util.Collections;
 import org.candlepin.subscriptions.subscription.api.model.Subscription;
@@ -34,20 +32,12 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
-@ActiveProfiles({"worker", "test"})
+@ActiveProfiles({"capacity-ingress", "test"})
 class SubscriptionServiceTest {
 
   @MockBean SearchApi searchApi;
 
   @Autowired SubscriptionService subject;
-
-  @Test
-  void verifySearchByAccountNumberTest() throws ApiException {
-    when(searchApi.searchSubscriptionsByAccountNumber("123", 0, 1))
-        .thenReturn(Collections.emptyList());
-    subject.getSubscriptionsByAccountNumber("123", 0, 1);
-    verify(searchApi, only()).searchSubscriptionsByAccountNumber("123", 0, 1);
-  }
 
   @Test
   void verifySearchByOrgIdTest() throws ApiException {

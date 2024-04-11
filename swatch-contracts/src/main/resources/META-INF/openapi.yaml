@@ -1,0 +1,1253 @@
+---
+openapi: 3.0.2
+info:
+  title: SWATCH Contract Service
+  version: 1.0.0
+  description: CRUD Operations for contract information
+  termsOfService: http://swagger.io/terms/
+  contact:
+    name: SWATCH Dev
+    url: https://github.com/RedHatInsights/rhsm-subscriptions
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+paths:
+  /api/rhsm-subscriptions/v1/capacity/products/{product_id}/{metric_id}:
+    description: 'Operations for capacity report for a given account and product'
+    parameters:
+      - name: product_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ProductId"
+        description: "The ID for the product we wish to query"
+      - name: metric_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/MetricId"
+        description: "The metric ID for the product we wish to query"
+      - name: offset
+        in: query
+        schema:
+          type: integer
+        description: "The number of items to skip before starting to collect the result set"
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+        description: "The numbers of items to return"
+    get:
+      summary: "Fetch a capacity report for an account and product."
+      operationId: getCapacityReportByMetricId
+      parameters:
+        - name: granularity
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/GranularityType'
+          description: "The level of granularity to return."
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/ReportCategory'
+          description: 'The category to fetch data for'
+        - name: sla
+          in: query
+          schema:
+            $ref: '#/components/schemas/ServiceLevelType'
+          description: "Include only capacity for the specified service level."
+        - name: usage
+          in: query
+          schema:
+            $ref: '#/components/schemas/UsageType'
+          description: "Include only capacity for the specified usage level."
+        - name: beginning
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: "Defines the start of the report period. Dates should be provided in ISO 8601
+            format but the only accepted offset is UTC. E.g. 2017-07-21T17:32:28Z"
+        - name: ending
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: "Defines the end of the report period.  Defaults to the current time. Dates should
+            be provided in UTC."
+      responses:
+        '200':
+          description: 'The request for a capacity report was successful.'
+          content:
+            application/vnd.api+json:
+              schema:
+                $ref: "#/components/schemas/CapacityReportByMetricId"
+              example:
+                data:
+                  - date: '2017-08-01T17:32:05Z'
+                    has_data: true
+                    value: 100.0
+                  - date: '2017-08-02T17:31:04Z'
+                    has_data: false
+                    value: 0.0
+                  - date: '2017-08-03T17:31:04Z'
+                    has_data: false
+                    value: 0.0
+                  - date: '2017-08-04T17:31:04Z'
+                    has_data: false
+                    value: 0.0
+                  - date: '2017-08-05T17:31:04Z'
+                    has_data: false
+                    value: 0.0
+                links:
+                  first: '/api/rhsm-subscriptions/v1/capacity/RHEL%20for%20x86/Sockets?granularity=DAILY&sla=Premium&beginning=2017-08-01T17%3A32%3A28Z&ending=2017-08-31T17%3A32%3A28Z&offset=0&limit=5'
+                  last: '/api/rhsm-subscriptions/v1/capacity/RHEL%20for%20x86/Sockets?granularity=DAILY&sla=Premium&beginning=2017-08-01T17%3A32%3A28Z&ending=2017-08-31T17%3A32%3A28Z&offset=5&limit=5'
+                  previous: null
+                  next: '/api/rhsm-subscriptions/v1/capacity/RHEL%20for%20x86/Sockets?granularity=DAILY&sla=Premium&beginning=2017-08-01T17%3A32%3A28Z&ending=2017-08-31T17%3A32%3A28Z&offset=5&limit=5'
+                meta:
+                  count: 10
+                  product: RHEL Server
+                  granularity: Daily
+                  service_level: Premium
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+      tags:
+        - capacity
+      security:
+        - customer: []
+  /api/swatch-contracts/internal/contracts/{uuid}:
+    delete:
+      parameters:
+        - examples:
+            uuid:
+              value: 8ece4096-bef6-4ad6-b0db-20c8e6b2a78c
+          name: uuid
+          description: UUID generated from a previously saved contract
+          schema:
+            type: string
+          in: path
+          required: true
+      responses:
+        "200":
+          description: Success
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      operationId: deleteContractByUUID
+      description: "This will execute a hard delete of a contract and its associated\
+        \ metrics from the database.  This is NOT the same as setting a contract to\
+        \ expired.  To expire a certificate, the updateContract endpoint should be\
+        \ used with an end_date."
+      security:
+        - test: []
+  /api/swatch-contracts/internal/contracts:
+    get:
+      parameters:
+        - examples:
+            org_id:
+              value: org123
+          name: org_id
+          description: ""
+          schema:
+            type: string
+          in: query
+          required: true
+        - examples:
+            product_id:
+              value: BASILISK
+          name: product_id
+          description: ""
+          schema:
+            type: string
+          in: query
+        - examples:
+            vendor_product_code:
+              value: 6n58d3s3qpvk22dgew2gal7w3
+          name: vendor_product_code
+          description: ""
+          schema:
+            type: string
+          in: query
+        - examples:
+            billing_provider:
+              value: aws
+          name: billing_provider
+          description: ""
+          schema:
+            type: string
+          in: query
+        - examples:
+            billing_account_id:
+              value: "123456789101"
+          name: billing_account_id
+          description: ""
+          schema:
+            type: string
+          in: query
+        - name: timestamp
+          description: Return only contract records active at this timestamp
+          schema:
+            type: string
+            format: date-time
+          in: query
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Contract'
+          description: success
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security:
+        - support: []
+        - test: []
+        - service: []
+      operationId: getContract
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContractRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractResponse'
+          description: success
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security:
+        - test: []
+      operationId: createContract
+  /api/swatch-contracts/internal/rpc/sync/contracts/{org_id}:
+    description: "Trigger a contract sync for a given Org ID"
+    post:
+      parameters:
+        - name: org_id
+          description: ""
+          schema:
+            type: string
+          in: path
+          required: true
+        - name: is_pre_cleanup
+          description: "When present, then delete existing contracts based on criteria"
+          schema:
+            type: boolean
+            default: false
+          in: query
+      summary: "Sync contracts for given org_id."
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              examples:
+                status response:
+                  value:
+                    status: 'Success'
+                    message: "Contracts Synced for given org_id"
+          description: success
+      security:
+        - support: []
+        - test: []
+      operationId: syncContractsByOrg
+  /api/swatch-contracts/internal/rpc/reset/contracts/{org_id}:
+    description: "Clear all contracts for a given org ID. "
+    delete:
+      parameters:
+        - name: org_id
+          description: ""
+          schema:
+            type: string
+          in: path
+          required: true
+      summary: "Clear all contracts for given org_id."
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              examples:
+                status response:
+                  value:
+                    status: 'Success'
+                    message: "Contracts Cleared for given org_id"
+          description: success
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+      operationId: deleteContractsByOrg
+  /internal/rpc/syncAllContracts:
+    description: "Trigger a sync for all contracts"
+    post:
+      summary: "Sync all contracts."
+      operationId: syncAllContracts
+      responses:
+        '202':
+          description: "The request for syncing all contracts is successfully running."
+          content:
+            application/vnd.api+json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+              examples:
+                status response:
+                  value:
+                    status: 'Success'
+                    message: "All contracts Synced"
+      security:
+        - support: []
+        - test: []
+  '/api/swatch-contracts/internal/rpc/partner/contracts':
+    post:
+      operationId: createPartnerEntitlementContract
+      requestBody:
+        description: Create a contract record from partner entitlement.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerEntitlementContract'
+            examples:
+              contract info:
+                value:
+                  action: contract-updated
+                  redHatSubscriptionNumber: '12400374'
+                  currentDimensions:
+                    -
+                      dimensionName: cpu-hours
+                      dimensionValue: '5'
+                      expirationDate: '2018-02-10T09:30Z'
+                    -
+                      dimensionName: instance-hours
+                      dimensionValue: '10'
+                      expirationDate: '2018-02-10T09:30Z'
+                  cloudIdentifiers:
+                    awsCustomerId: 'HSwCpt6sqkC'
+                    awsCustomerAccountId: '795061427196'
+                    productCode: '1234567890abcdefghijklmno'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              examples:
+                status response:
+                  value:
+                    status: 'Success'
+                    message: "Contract created"
+          description: Success
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security:
+        - test: []
+  /api/swatch-contracts/internal/subscriptions:
+    description: Save subscriptions manually. Supported only in dev-mode.
+    post:
+      operationId: saveSubscriptions
+      parameters:
+        - name: reconcileCapacity
+          in: query
+          schema:
+            type: boolean
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+            examples:
+              subscription:
+                "value": [
+                  {
+                    "id": "000149",
+                    "subscriptionNumber": "8838431",
+                    "subscriptionProducts": [
+                      {
+                        "sku": "MCT4121HR"
+                      }
+                    ],
+                    "webCustomerId": "14541308",
+                    "quantity": 1,
+                    "oracleAccountNumber": "",
+                    "effectiveStartDate": 1697847432103,
+                    "effectiveEndDate": 1730247432103,
+                    "externalReferences": {
+                      "awsMarketplace": {
+                        "subscriptionID": "100",
+                        "customerID": 102,
+                        "productCode": "testProductCode",
+                        "sellerAccount": "1234567",
+                        "customerAccountID": 102
+                      }
+                    }
+                  }
+                ]
+      responses:
+        '200':
+          description: Save a list of subscriptions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+              examples:
+                success:
+                  value: {
+                    "detail": "Success"
+                  }
+
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/rpc/subscriptions/sync:
+    description: Enqueue all sync-enabled orgs to sync their subscriptions with upstream
+    put:
+      summary: Enqueue all sync-enabled orgs to sync their subscriptions with upstream
+      operationId: syncAllSubscriptions
+      parameters:
+        - name: forceSync
+          in: query
+          schema:
+            type: boolean
+            default: "false"
+            description: "When true, it will trigger a sync of all subscription even when it was explicitly disabled via configuration."
+      responses:
+        '200':
+          description: The request for syncing all subscriptions is successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcResponse"
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/subscriptions/sync/org/{org_id}:
+    description: "Force sync of subscriptions for given org_id."
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: "The ID for the organization subscriptions to sync"
+    put:
+      summary: "Sync all subscriptions for given org_id."
+      operationId: forceSyncSubscriptionsForOrg
+      responses:
+        '200':
+          description: The request for syncing a single organization's subscription is processing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcResponse"
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/subscriptions/prune:
+    description: Remove subscription and capacity records that are in the denylist.
+    delete:
+      summary: Remove subscription and capacity records that are in the denylist.
+      operationId: pruneUnlistedSubscriptions
+      responses:
+        '200':
+          description: Prune of unlisted subscriptions is successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcResponse"
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/subscriptions/rhmUsageContext:
+    description: "Get the Red Hat Marketplace usage context."
+    parameters:
+      - name: orgId
+        in: query
+        required: true
+        schema:
+          type: string
+        description: "Customer's Org Id"
+      - name: date
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: productId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: sla
+        in: query
+        schema:
+          type: string
+      - name: usage
+        in: query
+        schema:
+          type: string
+    get:
+      summary: "Lookup necessary info to submit a usage record to RHM"
+      operationId: getRhmUsageContext
+      responses:
+        '200':
+          description: "Found RHM usage context matching the criteria."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RhmUsageContext'
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/subscriptions/awsUsageContext:
+    description: "Get AWS usage context."
+    parameters:
+      - name: orgId
+        in: query
+        schema:
+          type: string
+        description: "Customer's Org Id"
+      - name: date
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: productId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: sla
+        in: query
+        schema:
+          type: string
+      - name: usage
+        in: query
+        schema:
+          type: string
+      - name: awsAccountId
+        in: query
+        schema:
+          type: string
+          default: _ANY
+
+    get:
+      summary: "Lookup necessary info to submit a usage record to AWS"
+      operationId: getAwsUsageContext
+      responses:
+        '200':
+          description: "Found AWS usage context matching the criteria."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AwsUsageContext'
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/subscriptions/azureUsageContext:
+    get:
+      operationId: getAzureMarketplaceContext
+      summary: Lookup necessary info to submit a usage record to Azure
+      parameters:
+        - name: orgId
+          description: 'Look at subscriptions for this orgId'
+          example: org123
+          schema:
+            type: string
+          in: query
+        - name: date
+          description: 'Look at subscriptions starting on this date'
+          example: 2023-10-31T00:00:00Z
+          schema:
+            format: date-time
+            type: string
+          in: query
+          required: true
+        - name: productId
+          description: 'This value should correspond to a product variant tag as defined in swatch product configuration'
+          example: rhel-for-x86-els-payg
+          schema:
+            type: string
+          in: query
+          required: true
+        - name: sla
+          description: 'Look at subscriptions matching this SLA'
+          example: Premium
+          schema:
+            type: string
+          in: query
+        - name: usage
+          description: 'Look at subscriptions matching this usage'
+          example: Production
+          schema:
+            type: string
+          in: query
+        - name: azureAccountId
+          description: 'Look at subscriptions matching this billing_account_id'
+          schema:
+            type: string
+            default: _ANY
+          in: query
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AzureUsageContext'
+          description: Found Azure usage context matching the criteria.
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/offerings/{sku}/product_tags:
+    description: "Mapping sku to product tags."
+    parameters:
+      - name: sku
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: "Lookup product tags by sku"
+      operationId: getSkuProductTags
+      responses:
+        '200':
+          description: "The request to get product tags by sku ."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfferingProductTags'
+              example:
+                data:
+                  - Rho one
+                  - Rho two
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/tags/{tag}/metrics:
+    description: "Mapping sku to product tags."
+    parameters:
+      - name: tag
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: "Lookup metric information by tag"
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Matching metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MetricResponse'
+              example:
+                data:
+                  - metric_id: foo
+                    aws_dimension: foo1
+                    billing_factor: 0.25
+                  - metric_id: bar
+                    aws_dimension: bar1
+                    billing_factor: 1.0
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/rpc/offerings/sync/{sku}:
+    description: Sync an offering from the upstream source.
+    parameters:
+      - name: sku
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      summary: Sync an offering from the upstream source.
+      operationId: syncOffering
+      responses:
+        '200':
+          description: Sync for offering sku
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingResponse"
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/rpc/offerings/sync:
+    description: Syncs all offerings not listed in deny list from the upstream source.
+    put:
+      summary: Syncs all offerings not listed in deny list from the upstream source.
+      operationId: syncAllOfferings
+      responses:
+        '200':
+          description: Enqueued offerings to be synced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingResponse"
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/rpc/offerings/reconcile/{sku}:
+    description: Reconcile capacity for an offering from the upstream source.
+    parameters:
+      - name: sku
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      summary: Reconcile capacity for an offering from the upstream source.
+      operationId: forceReconcileOffering
+      responses:
+        '200':
+          description: Capacity Reconciliation for offering sku successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingResponse"
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+  /api/swatch-contracts/internal/subscriptions/terminate/{subscription_id}:
+    description: "Terminate a subscription with a given end date."
+    parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: "Subscription ID to terminate."
+    post:
+      operationId: terminateSubscription
+      summary: "Terminate a subscription."
+      parameters:
+        - name: timestamp
+          description: "The termination timestamp to use."
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: "The termination request was successful"
+          content:
+            application/vnd.api+json:
+              schema:
+                $ref: "#/components/schemas/TerminationRequest"
+        '400':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/BadRequest"
+        '403':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/Forbidden"
+        '404':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/ResourceNotFound"
+        '500':
+          $ref: "../../../../../spec/error-responses.yaml#/$defs/InternalServerError"
+      security:
+        - support: [ ]
+        - test: [ ]
+        - service: [ ]
+
+components:
+  schemas:
+    Error:
+      required:
+        - status
+        - code
+        - title
+      properties:
+        status:
+          type: string
+        code:
+          type: string
+        title:
+          type: string
+        detail:
+          type: string
+    ContractRequest:
+      description: ""
+      required:
+        - partner_entitlement
+        - subscription_id
+      type: object
+      properties:
+        partner_entitlement:
+          $ref: '../../../../../clients/rh-partner-gateway-client/rh-partner-gateway-api-spec.yaml#/components/schemas/PartnerEntitlementV1'
+        subscription_id:
+          description: The subscription ID provided by the Subscription API using the subscription number.
+          type: string
+    ContractResponse:
+      required:
+        - status
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusResponse'
+        contract:
+          $ref: '#/components/schemas/Contract'
+    Contract:
+      description: ""
+      required:
+        - start_date
+        - org_id
+        - billing_provider
+        - billing_account_id
+        - product_id
+        - metrics
+        - sku
+        - vendor_product_code
+      type: object
+      properties:
+        uuid:
+          description: Randomly generated if not set
+          type: string
+          example: 8ece4096-bef6-4ad6-b0db-20c8e6b2a78c
+        subscription_number:
+          description: ""
+          type: string
+          example: "12345678"
+        sku:
+          description: ""
+          type: string
+          example: BAS123
+        start_date:
+          format: date-time
+          description: ""
+          type: string
+          example: 2022-01-01T00:00:00Z
+        end_date:
+          format: date-time
+          description: ""
+          type: string
+          example: 2023-03-01T00:00:00Z
+        org_id:
+          description: ""
+          type: string
+          example: org123
+        billing_provider:
+          description: ""
+          type: string
+          example: aws
+        billing_provider_id:
+          description: Encoded additional information needed for billing
+          type: string
+        billing_account_id:
+          description: AWS billing account ids are 12 digits
+          type: string
+          example: "123456789101"
+        product_id:
+          description: ""
+          type: string
+          example: BASILISK
+        vendor_product_code:
+          description: ""
+          type: string
+          example: "6n58d3s3qpvk22dgew2gal7w3"
+        metrics:
+          description: ""
+          type: array
+          items:
+            $ref: '#/components/schemas/Metric'
+          example: "[{\"metric_id\": \"Instance-hours\", \"value\": 68.6}]"
+      example:
+        uuid: some text
+        subscription_number: some text
+        start_date: 2018-02-10T09:30Z
+        end_date: 2018-02-10T09:30Z
+        org_id: some text
+        billing_provider: aws
+        billing_account_id: some text
+        product_id: some text
+        metrics:
+          - metric_id: some text
+            value: 3.57
+          - metric_id: some text
+            value: 52.67
+    Metric:
+      title: Root Type for Metric
+      description: ""
+      required:
+        - value
+        - metric_id
+      type: object
+      properties:
+        metric_id:
+          type: string
+          example: Instance-hours
+        value:
+          format: int32
+          type: integer
+          example: 1
+      example:
+        metric_id: Instance-hours
+        value: 68.6
+    OfferingProductTags:
+      properties:
+        data:
+          type: array
+          items:
+            type: string
+    PartnerEntitlementContract:
+      properties:
+        action:
+          description: Create or update contract
+          type: string
+#          enum:
+#            - contract-updated
+        redHatSubscriptionNumber:
+          description: Map it to subscription_number
+          type: string
+        currentDimensions:
+          description: ''
+          type: array
+          items:
+            $ref: '#/components/schemas/Dimension'
+          example: '[{"dimensionName": "test_dim_1", "dimensionValue": 5, "expirationDate": "2023-02-15T00:00:00Z"}]'
+        cloudIdentifiers:
+          type: object
+          properties:
+            partner:
+              type: string
+            awsCustomerId:
+              type: string
+            awsCustomerAccountId:
+              type: string
+            productCode:
+              type: string
+            azureResourceId:
+              type: string
+            azureTenantId:
+              type: string
+            azureOfferId:
+              type: string
+            planId:
+              type: string
+    Dimension:
+      properties:
+        dimensionName:
+          type: string
+        dimensionValue:
+          type: string
+        expirationDate:
+          format: date-time
+          description: ''
+          type: string
+          example: '2023-03-01T00:00:00Z'
+    StatusResponse:
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+    # Schemas ending in "Type" are intentionally named to prevent naming conflicts with db model classes
+    GranularityType:
+      description: "Describes the significance of each date in the snapshot list. For example if the
+          granularity is set to 'weekly', the dates in the snapshot list will represent the start
+          of a seven day period."
+      type: string
+      enum: [ Hourly, Daily, Weekly, Monthly, Quarterly, Yearly ]
+    ServiceLevelType:
+      description: "Describes the service level that the report was made against. Not set if it
+          wasn't specified as a query parameter."
+      type: string
+      enum: [ "", Premium, Standard, Self-Support, _ANY ]
+    UsageType:
+      description: "Describes the usage that the report was made against. Not set if it wasn't
+          specified as a query parameter."
+      type: string
+      enum: [ "", Production, Development/Test, Disaster Recovery, _ANY ]
+    ReportCategory:
+      type: string
+      enum:
+        - physical
+        - virtual
+        - cloud
+        - hypervisor
+    CapacityReportByMetricId:
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapacitySnapshotByMetricId"
+        links:
+          $ref: "#/components/schemas/PageLinks"
+        meta:
+          type: object
+          properties:
+            count:
+              type: integer
+            product:
+              type: string
+            metric_id:
+              type: string
+            granularity:
+              $ref: '#/components/schemas/GranularityType'
+            service_level:
+              $ref: '#/components/schemas/ServiceLevelType'
+            usage:
+              $ref: '#/components/schemas/UsageType'
+            category:
+              $ref: '#/components/schemas/ReportCategory'
+          required:
+            - count
+            - product
+            - granularity
+    CapacitySnapshotByMetricId:
+      required:
+        - date
+        - has_data
+        - value
+      properties:
+        date:
+          type: string
+          format: date-time
+          description: "The start date for this snapshot entry. Dates are returned in UTC. Clients must
+            consult the 'granularity' field in the CapacityReport to determine the length of time each
+            CapacitySnapshot covers."
+        has_data:
+          type: boolean
+        value:
+          description: "Capacity value"
+          type: integer
+          format: int32
+          minimum: 0
+        has_infinite_quantity:
+          type: boolean
+    PageLinks:
+      properties:
+        first:
+          type: string
+        last:
+          type: string
+        previous:
+          type: string
+        next:
+          type: string
+      required:
+        - first
+        - last
+    ProductId:
+      type: string
+      format: ProductId
+    MetricId:
+      type: string
+      format: MetricId
+    RhmUsageContext:
+      description: Encapsulates all data needed to map tally snapshot usage to AWS UsageRecords.
+      properties:
+        rhSubscriptionId:
+          type: string
+    AwsUsageContext:
+      description: Encapsulates all data needed to map tally snapshot usage to AWS UsageRecords.
+      properties:
+        rhSubscriptionId:
+          type: string
+        customerId:
+          type: string
+        productCode:
+          type: string
+        awsSellerAccountId:
+          type: string
+        subscriptionStartDate:
+          type: string
+          format: date-time
+    AzureUsageContext:
+      description: Encapsulates all data needed to map tally snapshot usage to Azure UsageRecords.
+      properties:
+        azureResourceId:
+          description: IT Partner gateway will pass it under "cloudIdentifiers".  UMB messages under purchase.resourceId
+          type: string
+          example: 10d3a42f-cad5-4b55-8cd7-1569edf07a4d
+        azureTenantId:
+          description: IT Partner gateway will pass it under "cloudIdentifiers".  UMB messages under partnerIdentities.azureTenantId
+          type: string
+          example: 18087458-3905-4dea-80a4-758d69b7d2c5
+        offerId:
+          description: IT Partner gateway will pass it under "cloudIdentifiers".  UMB messages under purchase.vendorProductCode
+          type: string
+          example: azureProductCode
+        planId:
+          description: IT Partner gateway will pass it under "cloudIdentifiers".  UMB messages under contracts.planId
+          type: string
+          example: rh-rhel-sub-1yr
+    MetricResponse:
+      properties:
+        uom:
+          type: string
+        metric_id:
+          type: string
+        aws_dimension:
+          type: string
+        billing_factor:
+          type: number
+          format: double
+    TerminationRequest:
+      properties:
+        data:
+          type: object
+          properties:
+            termination_message:
+              type: string
+    RpcResponse:
+      properties:
+        result:
+          description: Result of the operation. Empty when succeeded.
+    SubscriptionResponse:
+      properties:
+        detail:
+          type: string
+    OfferingResponse:
+      properties:
+        detail:
+          type: string
+  responses:
+    ErrorResponse:
+      description: "Error handling request"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  securitySchemes:
+    customer:
+      type: apiKey
+      description: customer facing API
+      name: x-rh-identity
+      in: header
+    support:
+      type: apiKey
+      description: API is available for support operations
+      name: x-rh-identity
+      in: header
+    service:
+      type: apiKey
+      description: API is available for services
+      name: x-rh-swatch-psk
+      in: header
+    test:
+      type: apiKey
+      description: API is available for testing purposes (pre-production environments
+        only)
+      name: x-rh-swatch-psk
+      in: header

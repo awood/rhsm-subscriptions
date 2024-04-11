@@ -1,0 +1,1273 @@
+---
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: swatch-subscription-sync
+parameters:
+  - name: JAVA_DEBUG
+    # Set to "true" to enable remote debugging
+    value: ''
+  - name: JAVA_OPTS_APPEND
+    value: ''
+  - name: ENV_NAME
+    value: env-swatch-subscription-sync
+  - name: DEV_MODE
+    value: 'false'
+  - name: LOGGING_LEVEL_ROOT
+    value: WARN
+  - name: LOGGING_LEVEL
+    value: INFO
+  - name: KAFKA_MESSAGE_THREADS
+    value: '24'
+  - name: KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS
+    value: '3600000'
+  - name: KAFKA_SEEK_OVERRIDE_END
+    value: 'false'
+  - name: KAFKA_SEEK_OVERRIDE_TIMESTAMP
+    value: ''
+  - name: REPLICAS
+    value: '1'
+  - name: IMAGE
+    value: quay.io/cloudservices/rhsm-subscriptions
+  - name: IMAGE_TAG
+    value: latest
+  - name: IMAGE_PULL_SECRET
+    value: quay-cloudservices-pull
+  - name: MEMORY_REQUEST
+    value: 1000Mi
+  - name: MEMORY_LIMIT
+    value: 1744Mi
+  - name: CPU_REQUEST
+    value: 500m
+  - name: CPU_LIMIT
+    value: '900m'
+  - name: DATABASE_CONNECTION_TIMEOUT_MS
+    value: '30000'
+  - name: DATABASE_MAX_POOL_SIZE
+    value: '10'
+  - name: SUBSCRIPTION_SYNC_ENABLED
+    value: 'true'
+  - name: SUBSCRIPTION_PAGE_SIZE
+    value: '500'
+  - name: DEVTEST_SUBSCRIPTION_EDITING_ENABLED
+    value: 'false'
+  - name: DEVTEST_EVENT_EDITING_ENABLED
+    value: 'false'
+  - name: SUBSCRIPTION_SYNC_SCHEDULE
+    value: 0 10 * * *
+  - name: OFFERING_SYNC_SCHEDULE
+    value: 0 2 * * *
+  - name: SUBSCRIPTION_URL
+    value: https://subscription.stage.api.redhat.com/svcrest/subscription/v5
+  - name: SUBSCRIPTION_IGNORE_EXPIRED_OLDER_THAN
+    value: 2m
+  - name: SUBSCRIPTION_IGNORE_STARTING_LATER_THAN
+    value: 2m
+  - name: PRODUCT_URL
+    value: https://product.stage.api.redhat.com/svcrest/product/v3
+  - name: SUBSCRIPTION_MAX_CONNECTIONS
+    value: '100'
+  - name: SUBSCRIPTION_MAX_RETRY_ATTEMPTS
+    value: '4'
+  - name: SUBSCRIPTION_BACKOFF_INITIAL_INTERVAL
+    value: 1s
+  - name: SUBSCRIPTION_BACK_OFF_MAX_INTERVAL
+    value: 64s
+  - name: SUBSCRIPTION_BACK_OFF_MULTIPLIER
+    value: '2'
+  - name: USER_HOST
+  - name: USER_MAX_CONNECTIONS
+    value: '100'
+  - name: USER_MAX_ATTEMPTS
+    value: '10'
+  - name: USER_BACK_OFF_MAX_INTERVAL
+    value: 64s
+  - name: USER_BACK_OFF_INITIAL_INTERVAL
+    value: 1s
+  - name: USER_BACK_OFF_MULTIPLIER
+    value: '2'
+  - name: SPRING_ACTIVEMQ_BROKER_URL
+    value: vm://localhost?broker.persistent=false
+  - name: UMB_SERVICE_ACCOUNT_NAME
+    value: placeholder
+  - name: UMB_ENABLED
+    value: 'false'
+  - name: UMB_PROCESSING_ENABLED
+    value: 'true'
+  - name: UMB_KEYSTORE_PATH
+    value: /pinhead/keystore.jks
+  - name: ENABLE_PAYG_SUBSCRIPTION_FORCE_SYNC
+    value: 'true'
+  - name: ENABLE_SPLUNK_HEC
+    value: 'true'
+  - name: SPLUNK_SOURCE
+    value: 'rhsm-subscription-hec'
+  - name: SPLUNK_SOURCE_TYPE
+    value: 'springboot_server'
+  - name: SPLUNK_MESSAGE_FORMAT
+    value: 'text'
+  - name: SPLUNK_HEC_URL
+    value: https://splunk-hec.redhat.com:8088
+  - name: SPLUNK_HEC_CONNECT_TIMEOUT
+    value: '5000'
+  - name: SPLUNK_HEC_BATCH_SIZE
+    value: '1000'
+  - name: SPLUNK_HEC_TERMINATION_TIMEOUT
+    value: '2000'
+# nonprod secret keys have different syntax than prod/stage
+  - name: INVENTORY_SECRET_KEY_NAME
+    value: 'host-inventory-db'
+  - name: INVENTORY_SECRET_KEY_NAME_PREFIX
+    value: ''
+  - name: KAFKA_SUBSCRIPTIONS_SYNC_REPLICAS
+    value: '3'
+  - name: KAFKA_SUBSCRIPTIONS_SYNC_PARTITIONS
+    value: '3'
+  - name: KAFKA_CAPACITY_RECONCILE_REPLICAS
+    value: '3'
+  - name: KAFKA_CAPACITY_RECONCILE_PARTITIONS
+    value: '3'
+  - name: KAFKA_OFFERING_SYNC_REPLICAS
+    value: '3'
+  - name: KAFKA_OFFERING_SYNC_PARTITIONS
+    value: '3'
+  - name: KAFKA_SUBSCRIPTIONS_PRUNE_REPLICAS
+    value: '3'
+  - name: KAFKA_SUBSCRIPTIONS_PRUNE_PARTITIONS
+    value: '3'
+  - name: KAFKA_SUBSCRIPTIONS_EXPORT_REPLICAS
+    value: '3'
+  - name: KAFKA_SUBSCRIPTIONS_EXPORT_PARTITIONS
+    value: '3'
+  - name: CURL_CRON_IMAGE
+    value: quay.io/app-sre/ubi8-ubi-minimal
+  - name: CURL_CRON_IMAGE_TAG
+    value: latest
+  - name: CURL_CRON_MEMORY_REQUEST
+    value: 500Mi
+  - name: CURL_CRON_MEMORY_LIMIT
+    value: 800Mi
+  - name: CURL_CRON_CPU_REQUEST
+    value: 350m
+  - name: CURL_CRON_CPU_LIMIT
+    value: 500m
+  - name: OTEL_SERVICE_NAME
+    value: swatch-subscription-sync
+  - name: OTEL_JAVAAGENT_ENABLED
+    value: 'false'
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: 'http://localhost:4317'
+
+# allow overriding to support independent deploy with bonfire
+  - name: DB_POD
+    value: swatch-tally
+
+objects:
+  - apiVersion: cloud.redhat.com/v1alpha1
+    kind: ClowdApp
+    metadata:
+      name: swatch-subscription-sync
+      labels:
+        prometheus: rhsm
+    spec:
+      envName: ${ENV_NAME}
+
+# Needs to stay commented out until there's an rhsm ClowdApp deployed in stage/prod
+#      dependencies:
+#        - rhsm
+
+      kafkaTopics:
+        - replicas: ${{KAFKA_SUBSCRIPTIONS_SYNC_REPLICAS}}
+          partitions: ${{KAFKA_SUBSCRIPTIONS_SYNC_PARTITIONS}}
+          topicName: platform.rhsm-subscriptions.subscription-sync
+        - replicas: ${{KAFKA_CAPACITY_RECONCILE_REPLICAS}}
+          partitions: ${{KAFKA_CAPACITY_RECONCILE_PARTITIONS}}
+          topicName: platform.rhsm-subscriptions.capacity-reconcile
+        - replicas: ${{KAFKA_OFFERING_SYNC_REPLICAS}}
+          partitions: ${{KAFKA_OFFERING_SYNC_PARTITIONS}}
+          topicName: platform.rhsm-subscriptions.offering-sync
+        - replicas: ${{KAFKA_SUBSCRIPTIONS_PRUNE_REPLICAS}}
+          partitions: ${{KAFKA_SUBSCRIPTIONS_PRUNE_PARTITIONS}}
+          topicName: platform.rhsm-subscriptions.subscription-prune
+        - replicas: ${{KAFKA_SUBSCRIPTIONS_EXPORT_REPLICAS}}
+          partitions: ${{KAFKA_SUBSCRIPTIONS_EXPORT_PARTITIONS}}
+          topicName: platform.export.requests
+
+      database:
+        sharedDbAppName: swatch-tally
+      dependencies:
+        - swatch-tally
+        - rbac
+        - export-service
+
+      # Creates a database if local mode, or uses RDS in production
+      # database:
+      #   name: ${DB_POD}
+      #   version: 12
+
+      pullSecrets:
+        name: ${IMAGE_PULL_SECRET}
+
+      deployments:
+      - name: service
+        webServices:
+          public:
+            enabled: true
+          metrics:
+            enabled: true
+        replicas: ${{REPLICAS}}
+        podSpec:
+          image: ${IMAGE}:${IMAGE_TAG}
+          initContainers:
+            - env:
+                - name: JAVA_DEBUG
+                  value: ${JAVA_DEBUG}
+                - name: SPRING_PROFILES_ACTIVE
+                  value: liquibase-only
+                  # Override liquibase disablement in the main container
+                - name: SPRING_LIQUIBASE_ENABLED
+                  value: 'true'
+              inheritEnv: true
+              resources:
+                requests:
+                  cpu: ${CPU_REQUEST}
+                  memory: ${MEMORY_REQUEST}
+                limits:
+                  cpu: ${CPU_LIMIT}
+                  memory: ${MEMORY_LIMIT}
+          env:
+            - name: JAVA_DEBUG
+              value: ${JAVA_DEBUG}
+            - name: JAVA_OPTS_APPEND
+              value: -javaagent:/opt/splunk-otel-javaagent.jar ${JAVA_OPTS_APPEND}
+            - name: SPRING_LIQUIBASE_ENABLED
+              value: 'false'
+            - name: ENABLE_SPLUNK_HEC
+              value: ${ENABLE_SPLUNK_HEC}
+            - name: SPLUNKMETA_namespace
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: HOST_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: SPLUNK_HEC_URL
+              value: ${SPLUNK_HEC_URL}
+            - name: SPLUNK_HEC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: splunk-hec-external
+                  key: token
+            - name: SPLUNK_SOURCE
+              value: ${SPLUNK_SOURCE}
+            - name: SPLUNK_SOURCE_TYPE
+              value: ${SPLUNK_SOURCE_TYPE}
+            - name: SPLUNK_MESSAGE_FORMAT
+              value: ${SPLUNK_MESSAGE_FORMAT}
+            - name: SPLUNK_HEC_CONNECT_TIMEOUT
+              value: ${SPLUNK_HEC_CONNECT_TIMEOUT}
+            - name: SPLUNK_HEC_BATCH_SIZE
+              value: ${SPLUNK_HEC_BATCH_SIZE}
+            - name: SPLUNK_HEC_TERMINATION_TIMEOUT
+              value: ${SPLUNK_HEC_TERMINATION_TIMEOUT}
+            - name: SPRING_PROFILES_ACTIVE
+              value: capacity-ingress,api,kafka-queue
+            - name: SUBSCRIPTION_SYNC_ENABLED
+              value: ${SUBSCRIPTION_SYNC_ENABLED}
+            - name: LOG_FILE
+              value: /logs/server.log
+            - name: JAVA_MAX_MEM_RATIO
+              value: '85'
+            - name: GC_MAX_METASPACE_SIZE
+              value: '256'
+            - name: LOGGING_LEVEL_ROOT
+              value: ${LOGGING_LEVEL_ROOT}
+            - name: LOGGING_LEVEL_ORG_CANDLEPIN
+              value: ${LOGGING_LEVEL}
+            - name: KAFKA_MESSAGE_THREADS
+              value: ${KAFKA_MESSAGE_THREADS}
+            - name: KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS
+              value: ${KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS}
+            - name: KAFKA_SEEK_OVERRIDE_END
+              value: ${KAFKA_SEEK_OVERRIDE_END}
+            - name: KAFKA_SEEK_OVERRIDE_TIMESTAMP
+              value: ${KAFKA_SEEK_OVERRIDE_TIMESTAMP}
+            - name: DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${DB_POD}-db
+                  key: db.host
+            - name: DATABASE_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ${DB_POD}-db
+                  key: db.port
+            - name: DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ${DB_POD}-db
+                  key: db.user
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${DB_POD}-db
+                  key: db.password
+            - name: DATABASE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: ${DB_POD}-db
+                  key: db.name
+            - name: DATABASE_CONNECTION_TIMEOUT_MS
+              value: ${DATABASE_CONNECTION_TIMEOUT_MS}
+            - name: DATABASE_MAX_POOL_SIZE
+              value: ${DATABASE_MAX_POOL_SIZE}
+            - name: INVENTORY_DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: db.host
+            - name: INVENTORY_DATABASE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: ${INVENTORY_SECRET_KEY_NAME_PREFIX}name
+            - name: INVENTORY_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: db.user
+            - name: INVENTORY_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${INVENTORY_SECRET_KEY_NAME}
+                  key: ${INVENTORY_SECRET_KEY_NAME_PREFIX}password
+            - name: PRODUCT_DENYLIST_RESOURCE_LOCATION
+              value: file:/capacity-denylist/product-denylist.txt
+            - name: PRODUCT_KEYSTORE
+              value: /pinhead/keystore.jks
+            - name: PRODUCT_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tls
+                  key: keystore_password
+            - name: RHSM_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tls
+                  key: keystore_password
+            - name: RHSM_KEYSTORE
+              value: /pinhead/keystore.jks
+            - name: RHSM_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tls
+                  key: keystore_password
+            - name: RHSM_TRUSTSTORE
+              value: /pinhead/truststore.jks
+            - name: SUBSCRIPTION_KEYSTORE
+              value: /pinhead/keystore.jks
+            - name: SUBSCRIPTION_URL
+              value: ${SUBSCRIPTION_URL}
+            - name: SUBSCRIPTION_MAX_CONNECTIONS
+              value: ${SUBSCRIPTION_MAX_CONNECTIONS}
+            - name: SUBSCRIPTION_BACKOFF_INITIAL_INTERVAL
+              value: ${SUBSCRIPTION_BACKOFF_INITIAL_INTERVAL}
+            - name: SUBSCRIPTION_BACK_OFF_MAX_INTERVAL
+              value: ${SUBSCRIPTION_BACK_OFF_MAX_INTERVAL}
+            - name: SUBSCRIPTION_BACK_OFF_MULTIPLIER
+              value: ${SUBSCRIPTION_BACK_OFF_MULTIPLIER}
+            - name: SUBSCRIPTION_MAX_RETRY_ATTEMPTS
+              value: ${SUBSCRIPTION_MAX_RETRY_ATTEMPTS}
+            - name: SUBSCRIPTION_IGNORE_EXPIRED_OLDER_THAN
+              value: ${SUBSCRIPTION_IGNORE_EXPIRED_OLDER_THAN}
+            - name: SUBSCRIPTION_IGNORE_STARTING_LATER_THAN
+              value: ${SUBSCRIPTION_IGNORE_STARTING_LATER_THAN}
+            - name: PRODUCT_URL
+              value: ${PRODUCT_URL}
+            - name: SUBSCRIPTION_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tls
+                  key: keystore_password
+            - name: DEV_MODE
+              value: ${DEV_MODE}
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+            - name: SWATCH_EXPORT_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: export-psk
+                  key: export_psk
+            - name: USER_HOST
+              value: ${USER_HOST}
+            - name: USER_MAX_CONNECTIONS
+              value: ${USER_MAX_CONNECTIONS}
+            - name: USER_MAX_ATTEMPTS
+              value: ${USER_MAX_ATTEMPTS}
+            - name: USER_BACK_OFF_MAX_INTERVAL
+              value: ${USER_BACK_OFF_MAX_INTERVAL}
+            - name: USER_BACK_OFF_INITIAL_INTERVAL
+              value: ${USER_BACK_OFF_INITIAL_INTERVAL}
+            - name: USER_BACK_OFF_MULTIPLIER
+              value: ${USER_BACK_OFF_MULTIPLIER}
+            - name: SPRING_ACTIVEMQ_BROKER_URL
+              value: ${SPRING_ACTIVEMQ_BROKER_URL}
+            - name: UMB_KEYSTORE
+              value: file:${UMB_KEYSTORE_PATH}
+            - name: UMB_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tls
+                  key: keystore_password
+            - name: UMB_TRUSTSTORE
+              value: file:/pinhead/truststore.jks
+            - name: UMB_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tls
+                  key: keystore_password
+            - name: UMB_ENABLED
+              value: ${UMB_ENABLED}
+            - name: UMB_PROCESSING_ENABLED
+              value: ${UMB_PROCESSING_ENABLED}
+            - name: UMB_SERVICE_ACCOUNT_NAME
+              value: ${UMB_SERVICE_ACCOUNT_NAME}
+            - name: ENABLE_PAYG_SUBSCRIPTION_FORCE_SYNC
+              value: ${ENABLE_PAYG_SUBSCRIPTION_FORCE_SYNC}
+            - name: UMB_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+            - name: OTEL_SERVICE_NAME
+              value: ${OTEL_SERVICE_NAME}
+            - name: OTEL_JAVAAGENT_ENABLED
+              value: ${OTEL_JAVAAGENT_ENABLED}
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /health/liveness
+              port: 9000
+              scheme: HTTP
+            initialDelaySeconds: 70
+            periodSeconds: 20
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /health
+              port: 9000
+              scheme: HTTP
+            initialDelaySeconds: 70
+            periodSeconds: 20
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: ${CPU_REQUEST}
+              memory: ${MEMORY_REQUEST}
+            limits:
+              cpu: ${CPU_LIMIT}
+              memory: ${MEMORY_LIMIT}
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+            - name: capacity-denylist
+              mountPath: /capacity-denylist
+            - name: pinhead
+              mountPath: /pinhead
+          volumes:
+            - name: logs
+              emptyDir:
+            - name: capacity-denylist
+              configMap:
+                name: capacity-denylist
+            - name: pinhead
+              secret:
+                secretName: pinhead
+      jobs:
+      - name: subscription-sync
+        schedule: ${SUBSCRIPTION_SYNC_SCHEDULE}
+        activeDeadlineSeconds: 1800
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -H "Origin: https://swatch-subscription-sync-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X PUT "http://swatch-subscription-sync-service:8000/api/rhsm-subscriptions/v1/internal/rpc/subscriptions/sync"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+            # This env property is necessary to pass the test check.
+            - name: SPRING_PROFILES_ACTIVE
+              value: subscription-sync
+          resources:
+            requests:
+              cpu: ${CURL_CRON_CPU_REQUEST}
+              memory: ${CURL_CRON_MEMORY_REQUEST}
+            limits:
+              cpu: ${CURL_CRON_CPU_LIMIT}
+              memory: ${CURL_CRON_MEMORY_LIMIT}
+
+      - name: offering-sync
+        schedule: ${OFFERING_SYNC_SCHEDULE}
+        activeDeadlineSeconds: 1800
+        successfulJobsHistoryLimit: 2
+        restartPolicy: Never
+        podSpec:
+          image: ${CURL_CRON_IMAGE}:${CURL_CRON_IMAGE_TAG}
+          command:
+            - /usr/bin/bash
+            - -c
+            - >
+              /usr/bin/curl --fail -H "Origin: https://swatch-subscription-sync-service.redhat.com" -H "x-rh-swatch-psk: ${SWATCH_SELF_PSK}" -X PUT "http://swatch-subscription-sync-service:8000/api/rhsm-subscriptions/v1/internal/rpc/offerings/sync"
+          env:
+            - name: SWATCH_SELF_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: swatch-psks
+                  key: self
+            # This env property is necessary to pass the test check.
+            - name: SPRING_PROFILES_ACTIVE
+              value: offering-sync
+          resources:
+            requests:
+              cpu: ${CURL_CRON_CPU_REQUEST}
+              memory: ${CURL_CRON_MEMORY_REQUEST}
+            limits:
+              cpu: ${CURL_CRON_CPU_LIMIT}
+              memory: ${CURL_CRON_MEMORY_LIMIT}
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: swatch-psks
+    data:
+      self: cGxhY2Vob2xkZXI=
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: export-psk
+    data:
+      export_psk: dGVzdGluZy1hLXBzaw==
+
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: capacity-denylist
+    data:
+      product-denylist.txt: |-
+        BUN0063US
+        ES0113909
+        MCT0150US
+        MCT0151JP
+        MCT0151US
+        MCT0152US
+        MCT0163US
+        MCT0164US
+        MCT0165US
+        MCT0217US
+        MCT0218US
+        MCT0219US
+        MCT0220US
+        MCT0227US
+        MCT0228US
+        MCT0238JP
+        MCT0238US
+        MCT0240JP
+        MCT0240US
+        MCT0242JP
+        MCT0252JP
+        MCT0252US
+        MCT0254US
+        MCT0255US
+        MCT0256US
+        MCT0257US
+        MCT0267US
+        MCT0270US
+        MCT0271US
+        MCT0282RW
+        MCT0292JP
+        MCT0299JP
+        MCT0299US
+        MCT0300JP
+        MCT0300US
+        MCT0301JP
+        MCT0301US
+        MCT0302JP
+        MCT0302US
+        MCT0303US
+        MCT0304US
+        MCT0305US
+        MCT0306US
+        MCT0308US
+        MCT0317JP
+        MCT0317US
+        MCT0318JP
+        MCT0318US
+        MCT0319US
+        MCT0321US
+        MCT0322US
+        MCT0325US
+        MCT0326US
+        MCT0335
+        MCT0335F3
+        MCT0335F3RN
+        MCT0335RN
+        MCT0336
+        MCT0336F3
+        MCT0336F3RN
+        MCT0336RN
+        MCT0337
+        MCT0338
+        MCT0339
+        MCT0340
+        MCT0341
+        MCT0343
+        MCT0343F3
+        MCT0343F3RN
+        MCT0343RN
+        MCT0344
+        MCT0344F3
+        MCT0344F3RN
+        MCT0344RN
+        MCT0357
+        MCT0358
+        MCT0359
+        MCT0360
+        MCT0369
+        MCT0369F2
+        MCT0369F3
+        MCT0369F3RN
+        MCT0369F5
+        MCT0369RN
+        MCT0369S
+        MCT0370
+        MCT0370F2
+        MCT0370F3
+        MCT0370F3RN
+        MCT0370F4
+        MCT0370F5
+        MCT0370RN
+        MCT0370S
+        MCT0371US
+        MCT0372US
+        MCT0375JP
+        MCT0375US
+        MCT0381US
+        MCT0403
+        MCT0403F3
+        MCT0403F3RN
+        MCT0403RN
+        MCT0406
+        MCT0406F3
+        MCT0406F3RN
+        MCT0406RN
+        MCT0413
+        MCT0414
+        MCT0415
+        MCT0416
+        MCT0417
+        MCT0427
+        MCT0428
+        MCT0437
+        MCT0438
+        MCT0439
+        MCT0442
+        MCT0462
+        MCT0479JP
+        MCT0479US
+        MCT0480JP
+        MCT0483JP
+        MCT0483US
+        MCT0484JP
+        MCT0485JP
+        MCT0485US
+        MCT0486JP
+        MCT0486US
+        MCT0515US
+        MCT0516US
+        MCT0517US
+        MCT0518US
+        MCT0519US
+        MCT0553US
+        MCT0554US
+        MCT0556US
+        MCT0557US
+        MCT0558US
+        MCT0559US
+        MCT0561US
+        MCT0562US
+        MCT0563US
+        MCT0601US
+        MCT0602US
+        MCT0603US
+        MCT0604US
+        MCT0605US
+        MCT0606US
+        MCT0615US
+        MCT0616US
+        MCT0617US
+        MCT0618US
+        MCT0619US
+        MCT0620US
+        MCT0638US
+        MCT0646US
+        MCT0647US
+        MCT0649US
+        MCT0703US
+        MCT0704JP
+        MCT0704US
+        MCT0705JP
+        MCT0705US
+        MCT0711JP
+        MCT0711US
+        MCT0712US
+        MCT0718US
+        MCT0721US
+        MCT0722US
+        MCT0729US
+        MCT0730JP
+        MCT0730US
+        MCT0731JP
+        MCT0731US
+        MCT0737US
+        MCT0738US
+        MCT0744US
+        MCT0745US
+        MCT0748US
+        MCT0778US
+        MCT0779US
+        MCT0780US
+        MCT0781US
+        MCT0786
+        MCT0786RN
+        MCT0786S
+        MCT0804US
+        MCT0867
+        MCT0867F3
+        MCT0867F3RN
+        MCT0867RN
+        MCT0868
+        MCT0873
+        MCT0875
+        MCT0885
+        MCT0888
+        MCT0889
+        MCT0891
+        MCT0892
+        MCT0894
+        MCT0895
+        MCT0897
+        MCT0900
+        MCT0901
+        MCT0903
+        MCT0903F3
+        MCT0907
+        MCT0907F3
+        MCT0909
+        MCT0909F3
+        MCT0909F3RN
+        MCT0909RN
+        MCT0911
+        MCT0911F3
+        MCT0911RN
+        MCT0913
+        MCT0913F3
+        MCT0926
+        MCT0927
+        MCT0927F3
+        MCT0934
+        MCT0941
+        MCT0945
+        MCT0950
+        MCT0950F3
+        MCT0950F3RN
+        MCT0950RN
+        MCT0951
+        MCT0951F3
+        MCT0951F3RN
+        MCT0951RN
+        MCT0967
+        MCT0967F3
+        MCT0967F3RN
+        MCT0968F3
+        MCT0969
+        MCT0973
+        MCT0982
+        MCT0982-IPP
+        MCT0982F2
+        MCT0982F3
+        MCT0982F3RN
+        MCT0982F5
+        MCT0982RN
+        MCT0983
+        MCT0983F3
+        MCT0983F3RN
+        MCT0983F5
+        MCT0983RN
+        MCT0984
+        MCT0984F3
+        MCT0984F3RN
+        MCT0984RN
+        MCT0985
+        MCT0985F3
+        MCT0985F3RN
+        MCT0985RN
+        MCT0986
+        MCT0986F3
+        MCT0986F3RN
+        MCT0986F5
+        MCT0986RN
+        MCT0987
+        MCT0987F3
+        MCT0987F3RN
+        MCT0987RN
+        MCT0992
+        MCT0992F3
+        MCT0992F3RN
+        MCT0992F5
+        MCT0992RN
+        MCT1015
+        MCT1028
+        MCT1035
+        MCT1035F3
+        MCT1035F3RN
+        MCT1035F5
+        MCT1035RN
+        MCT1036
+        MCT1036F3
+        MCT1036F4
+        MCT1036F5
+        MCT1036RN
+        MCT1037
+        MCT1037F3
+        MCT1038
+        MCT1038F3
+        MCT1038RN
+        MCT1039
+        MCT1039F3
+        MCT1041
+        MCT1041F3
+        MCT1041RN
+        MCT1042
+        MCT1042F3
+        MCT1042F3RN
+        MCT1042F5
+        MCT1042RN
+        MCT1065
+        MCT1065F3
+        MCT1065F3RN
+        MCT1065F5
+        MCT1065RN
+        MCT1067
+        MCT1067F3
+        MCT1067F3RN
+        MCT1067RN
+        MCT1068
+        MCT1070
+        MCT1073
+        MCT1089
+        MCT1089F3
+        MCT1089F3RN
+        MCT1089RN
+        MCT1172
+        MCT1172F3
+        MCT1172F3RN
+        MCT1172RN
+        MCT1173
+        MCT1173F3
+        MCT1173RN
+        MCT1252
+        MCT1252F3
+        MCT1252RN
+        MCT1253
+        MCT1253F3
+        MCT1253F3RN
+        MCT1253RN
+        MCT1254
+        MCT1254F3
+        MCT1254RN
+        MCT1255
+        MCT1255F3
+        MCT1255RN
+        MCT1316
+        MCT1316F3
+        MCT1324
+        MCT1324F3
+        MCT1327
+        MCT1327F3
+        MCT1333
+        MCT1333F3
+        MCT1334F3
+        MCT1339
+        MCT1339F3
+        MCT1340
+        MCT1340F3
+        MCT1344
+        MCT1344F3
+        MCT1550
+        MCT1577
+        MCT1577F3
+        MCT1577RN
+        MCT1578
+        MCT1578F3
+        MCT1578F3RN
+        MCT1578RN
+        MCT1579
+        MCT1579RN
+        MCT1580
+        MCT1580RN
+        MCT1581
+        MCT1584
+        MCT1584F3
+        MCT1584F3RN
+        MCT1584RN
+        MCT1611
+        MCT1611F3
+        MCT1611F3RN
+        MCT1611RN
+        MCT1638
+        MCT1638F3
+        MCT1639
+        MCT1650
+        MCT1650F3
+        MCT1650F3RN
+        MCT1650RN
+        MCT1650S
+        MCT1652
+        MCT1652F3
+        MCT1653
+        MCT1653F3
+        MCT1692
+        MCT1692F3
+        MCT1692F3RN
+        MCT1692RN
+        MCT1697
+        MCT1697F3
+        MCT1697RN
+        MCT1731
+        MCT1731F3
+        MCT1731RN
+        MCT1732
+        MCT1732F3
+        MCT1741
+        MCT1742
+        MCT1742F3
+        MCT1747
+        MCT1749F3
+        MCT1756F3
+        MCT1756S
+        MCT1757
+        MCT1757S
+        MCT1771
+        MCT1771F3
+        MCT1780
+        MCT1789
+        MCT1789F3
+        MCT1789RN
+        MCT1790
+        MCT1790F3
+        MCT1790F3RN
+        MCT1790RN
+        MCT1791
+        MCT1791F3
+        MCT1791RN
+        MCT1792
+        MCT1792F3
+        MCT1792RN
+        MCT1799
+        MCT1799F3
+        MCT1799F3RN
+        MCT1799RN
+        MCT1800
+        MCT1800F3
+        MCT1842
+        MCT1842F3
+        MCT1843
+        MCT1844
+        MCT1851
+        MCT1851F3
+        MCT1851RN
+        MCT1852
+        MCT1852F3
+        MCT1852F3RN
+        MCT1852RN
+        MCT1853
+        MCT1853F3
+        MCT1853RN
+        MCT1854
+        MCT1854F3
+        MCT1860
+        MCT1861
+        MCT1861F3
+        MCT1865
+        MCT1865F3
+        MCT1869F3
+        MCT1869F3RN
+        MCT1871
+        MCT1871RN
+        MCT1872
+        MCT1872F3
+        MCT1873
+        MCT1874
+        MCT1874F3
+        MCT1901
+        MCT1901F3
+        MCT1914F3
+        MCT1914S
+        MCT1931
+        MCT1933
+        MCT1936
+        MCT1937
+        MCT1954
+        MCT1957
+        MCT1957F3
+        MCT1959
+        MCT1959F3
+        MCT2008
+        MCT2008RN
+        MCT2021
+        MCT2021F3
+        MCT2021RN
+        MCT2027
+        MCT2027F3
+        MCT2027F3RN
+        MCT2027RN
+        MCT2043
+        MCT2043F3
+        MCT2047
+        MCT2047RN
+        MCT2048
+        MCT2048RN
+        MCT2051
+        MCT2060
+        MCT2061
+        MCT2062
+        MCT2063
+        MCT2434F3
+        MCT2434F3RN
+        MCT2434RN
+        MCT2435
+        MCT2435F3
+        MCT2435F3RN
+        MCT2435RN
+        MCT2436
+        MCT2436F3RN
+        MCT2535
+        MCT2535F3
+        MCT2535F3RN
+        MCT2535RN
+        MCT2537
+        MCT2537F3
+        MCT2537F3RN
+        MCT2537F5
+        MCT2537RN
+        MCT2660
+        MCT2667
+        MCT2741
+        MCT2741F3
+        MCT2883
+        MCT3097
+        MCT3131
+        MCT3132
+        MCT3133
+        MCT3262
+        MCT3262F3
+        MCT3262F3RN
+        MCT3262RN
+        MCT3262S
+        MCT3632
+        MCT3718
+        MCT3719
+        MCT3857
+        MCT3857RN
+        MCT3857S
+        MCT4149
+        MCT4159
+        MCT4159F3
+        MW00567
+        MW00567F3
+        MW00571
+        MW00571F3
+        MW00571RN
+        MW00571S
+        MW00700
+        MW01618
+        MW01620
+        RH00798
+        RH01157
+        RH02427
+        RH02427F3
+        RH3310120
+        RH3387200
+        RHF0084JP
+        RHF0084RW
+        RHF0084US
+        RHF0085JP
+        RHF0085RW
+        RHF0085US
+        RHF0090JP
+        RHF0090US
+        RHF0116US
+        RHF0117JP
+        RHF0118US
+        RHF0119US
+        RHF0131AP
+        RHF0131AP-R5
+        RHF0131JP
+        RHF0131KR
+        RHF0131SC
+        RHF0131TC
+        RHF0131US
+        RHF0132AP
+        RHF0132JP
+        RHF0132KR
+        RHF0132US
+        RHF0134JP
+        RHF0134US
+        RHF0135AP
+        RHF0135US
+        RHF0137AP
+        RHF0137JP
+        RHF0137US
+        RHF0138US
+        RHF0140AP
+        RHF0140US
+        RHF0141US
+        RHF0143AP
+        RHF0143US
+        RHF0144US
+        RHF0164JP
+        RHF0166JP
+        RHF0182US
+        RHF0183US
+        RHF0184US
+        RHF0187US
+        RHF0188US
+        RHF0189US
+        RHF0202US
+        RHF0205US
+        RHF0263AP
+        RHF0263JP
+        RHF0263US
+        RHF0265AP
+        RHF0265JP
+        RHF0265US
+        RHF0294US
+        RHF0310AP
+        RHF0310AP-R2
+        RHF0310US
+        RHF0311AP
+        RHF0311US
+        RHF0320AP
+        RHF0320US
+        RHF0321US
+        RHF0329US
+        RHF0330US
+        RHF0335AP
+        RHF0335US
+        RHF0336AP
+        RHF0336US
+        RHF0341US
+        RHF0347US
+        RHF0348US
+        RHN019
+        RHN019-SYS
+        RHN019-SYSRW
+        RHN019RW
+        RHN020
+        RHN020-SYS
+        RHN020-SYSRW
+        RHN020RW
+        RHN021
+        RHN021-SYS
+        RHN039
+        RHN039-SYS
+        RHN040
+        RHN040-SYS
+        RV0130225
+        RV0130225RN
+        SER0085US
+        SER0086US
+        SER0091US
+        SER0093US
+        SER0094US
+        SER0100RW
+        SER0100US
+        SER0104RW
+        SER0104US
+        SER0105RW
+        SER0105US
+        SER0117US
+        SER0118US
+        SER0119US
+        SER0120US
+        SER0123US
+        SER0132US
+        SER0133US
+        SER0134US
+        SER0135US
+        SER0138US
+        SER0189US
+        SER0195US
+        SER0198US
+        SER0202US
+        SER0206US
+        SER0207US
+        SER0211US
+        SER0212US
+        SER0218US
+        SER0219US
+        SER0228US
+        SER0232US
+        SER0235US
+        SER0241US
+        SER0258US
+        SER0259US
+        SER0263-SI
+        SER0269
+        SER0270
+        SER0274
+        SER0281
+        SER0301
+        SER0302
+        SER0303
+        SER0355
+        SER0356
+        SER0357
+        SER0358
+        SER0360
+        SER0373
+        SER0375
+        SER0377
+        SER0378
+        SER0402
+        SER0403
+        SER0419
+        SER0440
+        SVC1882
+        SVC2461
+        SVC2462
+        SVC2463
+        SVC3026
+        SVC3027
+        SVC3028
+        SVC3029
+        SVC3030
+        SVC3031

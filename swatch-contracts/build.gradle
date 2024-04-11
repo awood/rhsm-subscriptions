@@ -1,0 +1,95 @@
+plugins {
+    id 'swatch.quarkus-conventions'
+    id 'swatch.liquibase-conventions'
+    id 'org.openapi.generator'
+}
+
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+liquibase {
+    activities {
+        main {
+            databaseChangeLogTableName "DATABASECHANGELOG_SWATCH_CONTRACTS"
+            databaseChangeLogLockTableName "DATABASECHANGELOGLOCK_SWATCH_CONTRACTS"
+        }
+    }
+}
+
+dependencies {
+    compileOnly libraries["lombok"]
+    implementation 'io.quarkus:quarkus-hibernate-validator'
+    implementation 'io.quarkus:quarkus-jackson'
+    implementation 'io.quarkus:quarkus-micrometer-registry-prometheus'
+    implementation 'io.quarkus:quarkus-opentelemetry'
+    implementation 'io.quarkus:quarkus-resteasy-reactive-jackson'
+    implementation 'io.quarkus:quarkus-security'
+    implementation 'io.quarkus:quarkus-smallrye-fault-tolerance'
+    implementation 'io.quarkus:quarkus-smallrye-openapi'
+    implementation("io.quarkus:quarkus-liquibase")
+    implementation("io.quarkus:quarkus-jdbc-postgresql")
+    implementation("io.quarkus:quarkus-hibernate-orm-panache")
+    implementation 'io.quarkus:quarkus-smallrye-reactive-messaging-amqp'
+    implementation 'io.smallrye.reactive:smallrye-reactive-messaging-in-memory'
+    implementation project(':clients:swatch-internal-subscription-client')
+    implementation project(':clients:quarkus:subscription-client')
+    implementation project(':swatch-common-config-workaround')
+    implementation project(':swatch-common-resteasy')
+    implementation project(':clients:quarkus:rbac-client')
+    implementation project(':swatch-product-configuration')
+    implementation project(':swatch-common-resteasy-client')
+    implementation project(":clients:rh-partner-gateway-client")
+    implementation libraries["clowder-quarkus-config-source"]
+    implementation libraries["quarkus-logging-splunk"]
+    implementation libraries["splunk-library-javalogging"]
+    implementation libraries["mapstruct"]
+    annotationProcessor enforcedPlatform(libraries["quarkus-bom"])
+    annotationProcessor "org.hibernate.orm:hibernate-jpamodelgen"
+    annotationProcessor libraries["mapstruct-processor"]
+    testImplementation 'io.rest-assured:rest-assured'
+    testImplementation 'org.mockito:mockito-junit-jupiter'
+    testImplementation 'io.quarkus:quarkus-test-security'
+    testImplementation libraries["junit-jupiter"]
+    testImplementation libraries["wiremock"]
+    testImplementation("io.quarkus:quarkus-jdbc-h2")
+    testAnnotationProcessor libraries["mapstruct-processor"]
+    // if you are using mapstruct in test code
+    annotationProcessor libraries["lombok-mapstruct-binding"]
+}
+
+compileJava.dependsOn tasks.openApiGenerate
+
+openApiGenerate {
+    generatorName = "java"
+    inputSpec = "${projectDir}/src/main/resources/META-INF/openapi.yaml"
+    outputDir = "${buildDir}/generated"
+    apiPackage = "com.redhat.swatch.contract.openapi.resource"
+    modelPackage = "com.redhat.swatch.contract.openapi.model"
+    invokerPackage = "com.redhat.swatch.contract.openapi"
+    groupId = "com.redhat.swatch.contract"
+    configOptions = [sourceFolder     : "src/gen/java",
+                     interfaceOnly    : "true",
+                     library          : "microprofile",
+                     java8            : "true",
+                     dateLibrary      : "java8",
+                     serializationLibrary: "jackson",
+                     useBeanValidation: "true",
+                     microprofileRestClientVersion: "3.0",
+                     useJakartaEE: "true",
+    ]
+    additionalProperties = [disableMultipart: "true", // see https://github.com/OpenAPITools/openapi-generator/pull/4713#issuecomment-633906581
+    ]
+    importMappings = [
+        "MetricId": "com.redhat.swatch.configuration.registry.MetricId",
+        "ProductId": "com.redhat.swatch.configuration.registry.ProductId",
+        "PartnerEntitlementV1": "com.redhat.swatch.clients.rh.partner.gateway.api.model.PartnerEntitlementV1"
+    ]
+    typeMappings = [
+        "string+MetricId": "MetricId",
+        "string+ProductId": "ProductId",
+    ]
+}
+
+sourceSets.main.java.srcDirs += ["${buildDir}/generated/src/gen/java"]

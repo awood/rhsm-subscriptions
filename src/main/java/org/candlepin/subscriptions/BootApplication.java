@@ -47,6 +47,7 @@ public class BootApplication {
     TimeZone.setDefault(TimeZone.getTimeZone(ZoneOffset.UTC));
     // Force liquibase-hub to off to avoid unnecessary warnings in our logs
     System.setProperty("liquibase.hub.mode", "off");
+
     SpringApplication app = new SpringApplication(BootApplication.class);
     app.run(args);
   }

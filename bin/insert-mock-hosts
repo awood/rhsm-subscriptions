@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import argparse
-import uuid
-import os
 import json
+import os
 import subprocess
 import sys
+import uuid
 
 output = sys.stdout
 
@@ -13,28 +13,33 @@ def generate_host(inventory_id=None, insights_id=None, account_number=None, org_
                   subscription_manager_id=None, cores=None, sockets=None, is_guest=None, hypervisor_uuid=None,
                   hardware_type=None, measurement_type=None, num_of_guests=None, last_seen=None, product=None,
                   sla=None, usage=None, is_unmapped_guest=None, is_hypervisor=None, cloud_provider=None,
-                  skip_buckets=False, is_hbi=False):
+                  skip_buckets=False, is_hbi=False, is_marketplace=False, host_type=None, billing_provider=None,
+                  billing_account_id=None, uom=None):
+    account = account_number or "account123"
+    org = org_id or "org123"
     host_id = uuid.uuid4()
-    inventory_id=inventory_id or uuid.uuid4()
-    insights_id=insights_id or uuid.uuid4()
+    inventory_id = inventory_id or uuid.uuid4()
+    insights_id = insights_id or uuid.uuid4()
+
     if not is_guest:
         hypervisor_uuid = None
+
     if is_hbi:
         host_fields = {
             'id': inventory_id,
-            'account': account_number or 'account123',
+            'account': account,
             'display_name': display_name or insights_id,
+            'org_id': org,
             'created_on': last_seen or '1993-03-26',
             'modified_on': last_seen or '1993-03-26',
             'facts': json.dumps({
                 'rhsm': {
-                    'orgId': f'org_{account_number or "account123"}',
-                    'VM_HOST_UUID': str(hypervisor_uuid) if hypervisor_uuid else None,
+                    'orgId': org_id or f'org_{account}',
                     'IS_VIRTUAL': is_guest,
                 },
             }),
             'canonical_facts': json.dumps({
-                'subscription_manager_id': subscription_manager_id,
+                'subscription_manager_id': subscription_manager_id or str(uuid.uuid4()),
                 'insights_id': str(insights_id),
             }),
             'system_profile_facts': json.dumps({
@@ -42,22 +47,26 @@ def generate_host(inventory_id=None, insights_id=None, account_number=None, org_
                 'infrastructure_type': hardware_type or 'PHYSICAL',
                 'cores_per_socket': cores // sockets,
                 'number_of_sockets': sockets,
+                'cloud_provider': cloud_provider,
+                'is_marketplace': is_marketplace,
+                'host_type': host_type,
+                'virtual_host_uuid': str(hypervisor_uuid) if hypervisor_uuid else None,
             }),
             'stale_timestamp': '2030-01-01',
             'reporter': 'rhsm-conduit',
+            'groups': '1',
         }
     else:
+        _create_account_service(account, 'HBI_HOST', org)
         host_fields = {
             'id': host_id,
             'instance_id': inventory_id,
             'inventory_id': inventory_id,
             'insights_id': insights_id,
-            'account_number': account_number or 'account123',
-            'org_id': org_id or 'org123',
+            'account_number': account,
+            'org_id': org,
             'display_name': display_name or insights_id,
             'subscription_manager_id': subscription_manager_id or uuid.uuid4(),
-            'cores': cores,
-            'sockets': sockets,
             'is_guest': is_guest or False,
             'hypervisor_uuid': hypervisor_uuid or None,
             'hardware_type': hardware_type or 'PHYSICAL',
@@ -65,12 +74,17 @@ def generate_host(inventory_id=None, insights_id=None, account_number=None, org_
             'last_seen': last_seen or '1993-03-26',
             'is_unmapped_guest': is_unmapped_guest or False,
             'is_hypervisor': is_hypervisor or False,
-            'cloud_provider': cloud_provider or None
+            'cloud_provider': cloud_provider or None,
+            'billing_provider': billing_provider or None,
+            'billing_account_id': billing_account_id or None
         }
 
     _generate_insert('hosts', **host_fields)
+    if not is_hbi:
+        _generate_measurements(host_id, uom, 1.0)
     if not is_hbi and not skip_buckets:
-        _generate_buckets(host_id, product, sla, usage, cores=cores, sockets=sockets, measurement_type=measurement_type)
+        _generate_buckets(host_id, product, sla, usage, as_hypervisor=is_hypervisor, cores=cores, sockets=sockets, measurement_type=measurement_type,
+        billing_provider=billing_provider, billing_account_id=billing_account_id)
     return host_fields
 
 
@@ -92,23 +106,56 @@ def _generate_insert(table, **host_fields):
     values = ','.join(db_repr(value) for value in values)
     output.write(f'insert into {table}({fields}) values ({values});\n')
 
-def _generate_buckets(host_id, product, sla, usage, as_hypervisor=False, measurement_type=None, cores=None, sockets=None):
-  sla = sla or 'Premium'
-  usage = usage or 'Production'
-  bucket_fields = {
-    'host_id': host_id,
-    'product_id': product or 'RHEL',
-    'as_hypervisor': as_hypervisor,
-    'measurement_type': measurement_type,
-    'cores': cores,
-    'sockets': sockets,
-  }
 
-  sla_vals = ["_ANY", sla]
-  usage_vals = ["_ANY", usage]
-  for next_sla in sla_vals:
-    for next_usage in usage_vals:
-      _generate_insert("host_tally_buckets", sla=next_sla, usage=next_usage, **bucket_fields)
+def _generate_buckets(host_id, product, sla, usage, as_hypervisor=False, measurement_type=None, cores=None,
+                      sockets=None, billing_provider=None, billing_account_id=None):
+    sla = sla or 'Premium'
+    usage = usage or 'Production'
+    bucket_fields = {
+        'host_id': host_id,
+        'product_id': product or 'RHEL',
+        'as_hypervisor': 'False',
+        'measurement_type': measurement_type,
+        'cores': cores,
+        'sockets': sockets,
+        'billing_provider': billing_provider,
+        'billing_account_id': billing_account_id
+    }
+    if as_hypervisor and measurement_type == 'PHYSICAL':
+        hypervisor_bucket_fields = {
+              'host_id': host_id,
+              'product_id': product or 'RHEL',
+              'as_hypervisor': 'True',
+              'measurement_type': 'HYPERVISOR',
+              'cores': cores,
+              'sockets': sockets,
+              'billing_provider': billing_provider,
+              'billing_account_id': billing_account_id
+          }
+    sla_vals = ["_ANY", sla]
+    usage_vals = ["_ANY", usage]
+    for next_sla in sla_vals:
+        for next_usage in usage_vals:
+            _generate_insert("host_tally_buckets", sla=next_sla, usage=next_usage, **bucket_fields)
+            if as_hypervisor and measurement_type == 'PHYSICAL':
+                _generate_insert("host_tally_buckets", sla=next_sla, usage=next_usage, **hypervisor_bucket_fields)
+
+
+def _generate_measurements(host_id, metric_id, value):
+    measurement_fields = {
+        'host_id': host_id,
+        'metric_id': metric_id,
+        'value': value,
+    }
+    _generate_insert("instance_measurements", **measurement_fields)
+
+
+def _create_account_service(account, service_type, org_id):
+    fields = ','.join(['account_number', 'service_type', 'org_id'])
+    values = ','.join(db_repr(value) for value in [account, service_type, org_id])
+    output.write(
+        f'insert into account_services ({fields}) values ({values}) ON CONFLICT ON CONSTRAINT account_services_pkey DO NOTHING;\n')
+
 
 parser = argparse.ArgumentParser(description='Insert mock hosts into the a local DB')
 parser.add_argument('--db-host',
@@ -135,11 +182,21 @@ parser.add_argument('--num-guests',
                     type=int,
                     default=0,
                     help='Insert a number of mock guests, running on a single hypervisor')
+parser.add_argument('--num-aws',
+                    type=int,
+                    default=0,
+                    help='Insert a number of mock aws instances')
+parser.add_argument('--num-gcp',
+                    type=int,
+                    default=0,
+                    help='Insert a number of mock gcp instances')
 parser.add_argument('--unmapped-guests',
                     default=False,
                     help='Are the guests to be created unmapped?')
 parser.add_argument('--account',
                     help='Set the account for the inserted records')
+parser.add_argument('--org',
+                    help='Set the organization for the inserted records')
 parser.add_argument('--num-accounts', type=int, default=1,
                     help='treat "--account" as a prefix and generate a number of accounts')
 parser.add_argument('--hypervisor-id',
@@ -151,9 +208,9 @@ parser.add_argument('--sla',
 parser.add_argument('--usage',
                     help='Set the usage for the inserted hosts')
 parser.add_argument('--cores', default=4,
-                    help='Set the cores for the inserted hosts')
+                    help='Set the cores for the inserted hosts', type=int)
 parser.add_argument('--sockets', default=1,
-                    help='Set the sockets for the inserted hosts')
+                    help='Set the sockets for the inserted hosts', type=int)
 parser.add_argument('--output-sql', action='store_true')
 parser.add_argument('--hbi', action='store_true', dest='is_hbi',
                     help='Mock HBI data rather than tally data')
@@ -161,6 +218,20 @@ parser.add_argument('--opt-in', action='store_true',
                     help='Opt in this account')
 parser.add_argument('--clear', action='store_true',
                     help='Clear data in the hosts table and related tables')
+parser.add_argument('--marketplace', action='store_true', dest='is_marketplace',
+                    help='Set a system as a Marketplace instance')
+parser.add_argument('--host-type',
+                    default=None,
+                    help='Set host type of the system to be inserted')
+parser.add_argument('--billing-provider',
+                    default="_ANY",
+                    help='Set the billing_provider for the inserted records')
+parser.add_argument('--billing-account-id',
+                    default="_ANY",
+                    help='Set the billing_account_id for the inserted records')
+parser.add_argument('--uom',
+                    default="CORES",
+                    help='Set the uom for the inserted records')
 
 args = parser.parse_args()
 if args.is_hbi:
@@ -174,7 +245,7 @@ os.environ['PGPASSWORD'] = args.db_password or default_password
 
 psql = None
 if not args.output_sql:
-    psql = subprocess.Popen('psql', stdin=subprocess.PIPE, shell=True, text=True)
+    psql = subprocess.Popen('psql', stdin=subprocess.PIPE, shell=True, encoding='utf-8')
     output = psql.stdin
 
 output.write('begin;')
@@ -186,38 +257,72 @@ if args.clear:
 for i in range(args.num_accounts):
     if args.num_accounts > 1:
         account = f'{args.account}{i}'
+        org = f'{args.org}{i}'
     else:
         account = args.account
+        org = args.org
     if args.opt_in:
-        _generate_insert('account_config',
-            account_number=account,
-            sync_enabled=True,
-            reporting_enabled=True,
-            opt_in_type='API',
-            created='2021-01-01',
-            updated='2021-01-01'
-        )
+        _generate_insert('org_config',
+                         org_id=org,
+                         opt_in_type='API',
+                         created='2021-01-01',
+                         updated='2021-01-01'
+                         )
 
     product = args.product or "RHEL"
 
+    for i in range(args.num_aws):
+        generate_host(account_number=account, org_id=args.org, hardware_type='VIRTUALIZED', measurement_type='AWS',
+                      product=args.product, sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets,
+                      is_hbi=args.is_hbi, num_of_guests=args.num_guests,
+                      cloud_provider='AWS', is_marketplace=args.is_marketplace, host_type=args.host_type,
+                      billing_provider=args.billing_provider, billing_account_id=args.billing_account_id,
+                      uom=args.uom)
+
+    for i in range(args.num_gcp):
+        generate_host(account_number=account, org_id=args.org, hardware_type='VIRTUALIZED', measurement_type='GOOGLE',
+                      product=args.product, sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets,
+                      is_hbi=args.is_hbi, num_of_guests=args.num_guests,
+                      cloud_provider='GCP', is_marketplace=args.is_marketplace, host_type=args.host_type,
+                      billing_provider=args.billing_provider, billing_account_id=args.billing_account_id,
+                      uom=args.uom)
+
     for i in range(args.num_physical):
-        generate_host(account_number=account, hardware_type='PHYSICAL', measurement_type='PHYSICAL',
-                    product=args.product, sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets, is_hbi=args.is_hbi)
+        generate_host(account_number=account, org_id=args.org, hardware_type='PHYSICAL', measurement_type='PHYSICAL',
+                      product=args.product, sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets,
+                      is_hbi=args.is_hbi, num_of_guests=args.num_guests,
+                      is_marketplace=args.is_marketplace,
+                      host_type=args.host_type,
+                      billing_provider=args.billing_provider, billing_account_id=args.billing_account_id,
+                      uom=args.uom)
 
     hypervisor = None
     for i in range(args.num_hypervisors):
-        hypervisor = generate_host(account_number=account, hardware_type='PHYSICAL', measurement_type='VIRTUAL', product=args.product,
-                                sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets, is_hypervisor=True)
+        hypervisor = generate_host(account_number=account, org_id=args.org, hardware_type='PHYSICAL', measurement_type='VIRTUAL',
+                                   product=args.product,
+                                   sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets,
+                                   is_hypervisor=True, is_hbi=args.is_hbi,
+                                   is_marketplace=args.is_marketplace,
+                                   host_type=args.host_type,
+                                   billing_provider=args.billing_provider, billing_account_id=args.billing_account_id,
+                                   uom=args.uom)
         # create a physical entry for the host as well.
-        generate_host(account_number=account, hardware_type='PHYSICAL', measurement_type='PHYSICAL', product=args.product,
-                    sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets, is_hypervisor=True, is_hbi=args.is_hbi)
+        if not args.is_hbi:
+            generate_host(account_number=account, org_id=args.org, hardware_type='PHYSICAL', measurement_type='PHYSICAL',
+                          product=args.product,
+                          sla=args.sla, usage=args.usage, cores=args.cores, sockets=args.sockets, is_hypervisor=True,
+                          is_hbi=args.is_hbi,
+                          is_marketplace=args.is_marketplace,
+                          host_type=args.host_type,
+                          billing_provider=args.billing_provider, billing_account_id=args.billing_account_id, uom=args.uom)
 
     create_unmapped = args.unmapped_guests
     for i in range(args.num_guests):
         if args.hypervisor_id:
             hypervisor_uuid = args.hypervisor_id
         elif hypervisor is not None:
-            hypervisor_uuid = hypervisor['subscription_manager_id']
+            hypervisor_uuid = hypervisor.get('subscription_manager_id') or json.loads(hypervisor['canonical_facts'])[
+                'subscription_manager_id']
             # If we are associating the guests with a created hypervisor host, don't allow it to be unmapped
             # since it was considered as reported.
             create_unmapped = False
@@ -225,10 +330,13 @@ for i in range(args.num_accounts):
             hypervisor_uuid = None
 
         skip_buckets = "RHEL" in product.upper()
-        generate_host(account_number=account, hardware_type='VIRTUALIZED', is_guest=True,
-                    product=args.product, sla=args.sla, usage=args.usage, hypervisor_uuid=hypervisor_uuid,
-                    cores=args.cores, sockets=args.sockets, is_unmapped_guest=create_unmapped,
-                    skip_buckets=skip_buckets, is_hbi=args.is_hbi)
+        generate_host(account_number=account, org_id=args.org, hardware_type='VIRTUALIZED', is_guest=True,
+                      product=args.product, sla=args.sla, usage=args.usage, hypervisor_uuid=hypervisor_uuid,
+                      cores=args.cores, sockets=args.sockets, is_unmapped_guest=create_unmapped,
+                      skip_buckets=skip_buckets, is_hbi=args.is_hbi,
+                      is_marketplace=args.is_marketplace, host_type=args.host_type,
+                      billing_provider=args.billing_provider, billing_account_id=args.billing_account_id,
+                      uom=args.uom)
 
 output.write('commit;')
 

@@ -21,7 +21,6 @@
 package org.candlepin.subscriptions.task.queue.kafka;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import java.util.concurrent.CountDownLatch;
@@ -44,20 +43,20 @@ public class KafkaTaskQueueTester {
 
   @Autowired private TaskQueueProperties taskQueueProperties;
 
-  protected void runSendAndReceiveTaskMessageTest() throws InterruptedException {
-    String account = "12345";
+  protected void runSendAndReceiveTaskMessageTestWithOrg() throws InterruptedException {
+    String org = "o1";
     TaskDescriptor taskDescriptor =
-        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, taskQueueProperties.getTopic())
-            .setSingleValuedArg("accounts", account)
+        TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, taskQueueProperties.getTopic(), null)
+            .setSingleValuedArg("orgs", org)
             .build();
 
     // Expect the task to be ran once.
     CountDownLatch latch = new CountDownLatch(1);
     CountDownTask cdt = new CountDownTask(latch);
 
-    when(factory.build(eq(taskDescriptor))).thenReturn(cdt);
+    when(factory.build(taskDescriptor)).thenReturn(cdt);
 
-    manager.updateAccountSnapshots(account);
+    manager.updateOrgSnapshots(org);
 
     // Wait a max of 5 seconds for the task to be executed
     latch.await(5L, TimeUnit.SECONDS);

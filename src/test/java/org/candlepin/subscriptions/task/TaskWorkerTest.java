@@ -21,39 +21,41 @@
 package org.candlepin.subscriptions.task;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.BDDMockito.*;
+import static org.mockito.BDDMockito.any;
+import static org.mockito.BDDMockito.doThrow;
+import static org.mockito.BDDMockito.verify;
+import static org.mockito.BDDMockito.when;
 
 import org.candlepin.subscriptions.tally.TallyTaskFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.test.context.ActiveProfiles;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-@SpringBootTest
-@ActiveProfiles({"worker", "test"})
-public class TaskWorkerTest {
+@ExtendWith(MockitoExtension.class)
+class TaskWorkerTest {
 
-  @MockBean private TallyTaskFactory factory;
+  @Mock private TallyTaskFactory factory;
 
   @Mock private Task mockTask;
 
   @Test
-  public void testExecuteTask() throws Exception {
+  void testExecuteTask() throws Exception {
     TaskWorker worker = new TaskWorker(factory);
     when(factory.build(any(TaskDescriptor.class))).thenReturn(mockTask);
-    worker.executeTask(TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group").build());
+    worker.executeTask(TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group", null).build());
     verify(mockTask).execute();
   }
 
   @Test
-  public void testThrowsTaskExecutionExceptionOnTaskFailure() throws Exception {
+  void testThrowsTaskExecutionExceptionOnTaskFailure() throws Exception {
     TaskWorker worker = new TaskWorker(factory);
     when(factory.build(any(TaskDescriptor.class))).thenReturn(mockTask);
     doThrow(RuntimeException.class).when(mockTask).execute();
     assertThrows(
         TaskExecutionException.class,
         () ->
-            worker.executeTask(TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group").build()));
+            worker.executeTask(
+                TaskDescriptor.builder(TaskType.UPDATE_SNAPSHOTS, "group", null).build()));
   }
 }
