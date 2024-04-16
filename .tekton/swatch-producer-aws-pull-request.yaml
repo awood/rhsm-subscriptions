@@ -8,8 +8,7 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "awood/konflux" && ( "swatch-producer-aws/***".pathChanged() || ".tekton/swatch-producer-aws-pull-request.yaml".pathChanged()
-      )
+      == "awood/konflux"
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: rhsm-subscriptions
@@ -20,7 +19,7 @@ metadata:
 spec:
   params:
   - name: dockerfile
-    value: src/main/docker/Dockerfile.jvm
+    value: swatch-producer-aws/src/main/docker/Dockerfile.jvm
   - name: git-url
     value: '{{source_url}}'
   - name: image-expires-after
@@ -28,7 +27,7 @@ spec:
   - name: output-image
     value: quay.io/redhat-user-workloads/awood1-tenant/rhsm-subscriptions/swatch-producer-aws:on-pr-{{revision}}
   - name: path-context
-    value: swatch-producer-aws
+    value: .
   - name: revision
     value: '{{revision}}'
   pipelineSpec:
